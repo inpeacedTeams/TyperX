@@ -9,7 +9,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from typerx.persistence.store import AppStore
-from typerx.ui.main_window import MainWindow
+from typerx.ui.window import MainWindow
 
 
 def _configure_logging(data_dir: Path) -> None:
