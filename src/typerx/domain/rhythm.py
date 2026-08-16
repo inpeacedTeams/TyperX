@@ -29,14 +29,25 @@ class RhythmEngine:
             multiplier += self.rng.uniform(1.1, 2.3)
         elif self.profile.punctuation_pauses and char in ".!?…":
             multiplier += self.rng.uniform(2.8, 5.2)
-        return min(0.95, max(0.012, base * multiplier))
+        return min(0.95, max(0.008, base * multiplier))
 
     def correction_pause(self) -> tuple[float, float]:
-        return self.rng.uniform(0.06, 0.17), self.rng.uniform(0.05, 0.14)
+        speed = self._speed_factor()
+        return (
+            self.rng.uniform(0.035, 0.11) * speed,
+            self.rng.uniform(0.03, 0.09) * speed,
+        )
 
     def before_send_pause(self) -> float:
-        return self.rng.uniform(0.08, 0.24)
+        # At maximum speed Enter should feel like another keystroke, not a thought pause.
+        speed = self._speed_factor()
+        return max(0.004, self.rng.uniform(0.012, 0.045) * speed)
 
     def between_messages_pause(self, previous_length: int) -> float:
-        length_bonus = min(0.16, previous_length * 0.0025)
-        return self.rng.uniform(0.16, 0.46) + length_bonus * self.rng.random()
+        del previous_length
+        speed = self._speed_factor()
+        return max(0.006, self.rng.uniform(0.018, 0.065) * speed)
+
+    def _speed_factor(self) -> float:
+        # 100 WPM keeps a tiny human gap; 280 WPM compresses it to almost zero.
+        return max(0.22, min(1.0, 100.0 / max(25, self.profile.wpm)))
