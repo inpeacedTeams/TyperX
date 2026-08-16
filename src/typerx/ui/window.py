@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Slot
+from PySide6.QtCore import QThread, Qt, Slot
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSlider
 
+from typerx.domain.models import TypingProfile
 from typerx.domain.splitter import SplitPlan
 from typerx.persistence.store import AppStore
 from typerx.platform.windows import WindowsInput
@@ -11,16 +13,45 @@ from typerx.ui.main_window import TypingWorker
 
 
 class MainWindow(MainWindowView):
-    """Owns background typing sessions for their complete Qt lifecycle.
-
-    PySide wrappers are reference-counted independently from their C++ objects. Keeping the
-    worker only in a local variable can destroy it before QThread emits ``started``, producing
-    a silent no-op. This controller holds both objects until ``finished``.
-    """
+    """Production controller that owns typing sessions and advanced rhythm controls."""
 
     def __init__(self, store: AppStore) -> None:
         self.worker: TypingWorker | None = None
         super().__init__(store)
+
+    def _settings_panel(self):
+        panel = super()._settings_panel()
+        layout = panel.layout()
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Слов в сообщении"))
+        row.addStretch()
+        self.words_value = QLabel()
+        self.words_value.setStyleSheet("color:#6d43c5;font-weight:700")
+        row.addWidget(self.words_value)
+
+        self.words = QSlider(Qt.Orientation.Horizontal)
+        self.words.setRange(1, 16)
+        self.words.setToolTip("TyperX будет стремиться к этой длине, иногда отклоняясь на одно слово")
+        self.words.valueChanged.connect(self._settings_changed)
+        layout.insertLayout(7, row)
+        layout.insertWidget(8, self.words)
+        return panel
+
+    def _load_profile(self, profile: TypingProfile) -> None:
+        super()._load_profile(profile)
+        self.words.setValue(profile.words_per_message)
+        self._refresh_labels()
+
+    def _profile(self) -> TypingProfile:
+        profile = super()._profile()
+        profile.words_per_message = self.words.value()
+        return profile.normalized()
+
+    def _refresh_labels(self) -> None:
+        super()._refresh_labels()
+        if hasattr(self, "words_value"):
+            self.words_value.setText(f"≈ {self.words.value()}")
 
     @Slot()
     def _hotkey_start(self) -> None:
@@ -33,18 +64,14 @@ class MainWindow(MainWindowView):
             self._error("Открой чат и поставь курсор в поле сообщения, затем нажми F8")
             return
 
-        plan: SplitPlan = self.splitter.plan(
-            self.editor.toPlainText(), self._profile(), seed=None
-        )
+        plan: SplitPlan = self.splitter.plan(self.editor.toPlainText(), self._profile(), seed=None)
         if not plan.messages:
             self._error("В шаблоне нет текста для отправки")
             return
 
         self.service = TypingService()
         self.worker_thread = QThread(self)
-        self.worker = TypingWorker(
-            self.service, plan, self._profile(), target
-        )
+        self.worker = TypingWorker(self.service, plan, self._profile(), target)
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.run)

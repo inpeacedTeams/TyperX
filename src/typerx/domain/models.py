@@ -10,6 +10,7 @@ class TypingProfile:
     wpm: int = 105
     variation: int = 24
     typo_rate: float = 12.0
+    words_per_message: int = 5
     smart_split: bool = True
     fix_typos: bool = True
     punctuation_pauses: bool = True
@@ -22,6 +23,7 @@ class TypingProfile:
             wpm=max(25, min(280, int(self.wpm))),
             variation=max(0, min(55, int(self.variation))),
             typo_rate=max(0.0, min(40.0, float(self.typo_rate))),
+            words_per_message=max(1, min(16, int(self.words_per_message))),
             smart_split=bool(self.smart_split),
             fix_typos=bool(self.fix_typos),
             punctuation_pauses=bool(self.punctuation_pauses),
@@ -51,7 +53,7 @@ class TextTemplate:
 
 @dataclass(slots=True)
 class AppState:
-    schema_version: int = 2
+    schema_version: int = 3
     profile: TypingProfile = field(default_factory=TypingProfile)
     templates: list[TextTemplate] = field(default_factory=list)
     selected_template_id: str = ""
