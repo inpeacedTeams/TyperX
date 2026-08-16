@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StartupObject>TyperX.Program</StartupObject>
+    <AssemblyName>TyperX</AssemblyName>
+    <RootNamespace>TyperX</RootNamespace>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>
