@@ -3,15 +3,16 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass
-from typing import Callable
 
 LOGGER = logging.getLogger(__name__)
-IS_WINDOWS = hasattr(ctypes, "windll")
+IS_WINDOWS = hasattr(ctypes, "WinDLL")
 
 if IS_WINDOWS:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [
@@ -19,18 +20,25 @@ if IS_WINDOWS:
             ("wScan", wintypes.WORD),
             ("dwFlags", wintypes.DWORD),
             ("time", wintypes.DWORD),
-            ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+            ("dwExtraInfo", ctypes.c_size_t),
         ]
 
     class MOUSEINPUT(ctypes.Structure):
         _fields_ = [
-            ("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
-            ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),
         ]
 
     class HARDWAREINPUT(ctypes.Structure):
-        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
+        _fields_ = [
+            ("uMsg", wintypes.DWORD),
+            ("wParamL", wintypes.WORD),
+            ("wParamH", wintypes.WORD),
+        ]
 
     class INPUT_UNION(ctypes.Union):
         _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("hi", HARDWAREINPUT)]
@@ -38,6 +46,10 @@ if IS_WINDOWS:
     class INPUT(ctypes.Structure):
         _anonymous_ = ("u",)
         _fields_ = [("type", wintypes.DWORD), ("u", INPUT_UNION)]
+
+    user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    user32.SendInput.restype = wintypes.UINT
+    user32.GetForegroundWindow.restype = wintypes.HWND
 
 
 class FocusChangedError(RuntimeError):
@@ -69,10 +81,13 @@ class WindowsInput:
 
     def write(self, char: str) -> None:
         self.assert_focus()
-        codepoint = ord(char)
-        down = self._unicode_input(codepoint, 0)
-        up = self._unicode_input(codepoint, self.KEYEVENTF_KEYUP)
-        self._send((INPUT * 2)(down, up))
+        utf16 = char.encode("utf-16-le", errors="strict")
+        units = [int.from_bytes(utf16[i : i + 2], "little") for i in range(0, len(utf16), 2)]
+        events: list[INPUT] = []
+        for unit in units:
+            events.append(self._unicode_input(unit, 0))
+            events.append(self._unicode_input(unit, self.KEYEVENTF_KEYUP))
+        self._send(events)
 
     def enter(self) -> None:
         self._virtual_key(self.VK_RETURN)
@@ -82,18 +97,24 @@ class WindowsInput:
 
     def _virtual_key(self, key: int) -> None:
         self.assert_focus()
-        down = INPUT(type=1, ki=KEYBDINPUT(wVk=key))
-        up = INPUT(type=1, ki=KEYBDINPUT(wVk=key, dwFlags=self.KEYEVENTF_KEYUP))
-        self._send((INPUT * 2)(down, up))
+        self._send(
+            [
+                INPUT(type=1, ki=KEYBDINPUT(wVk=key)),
+                INPUT(type=1, ki=KEYBDINPUT(wVk=key, dwFlags=self.KEYEVENTF_KEYUP)),
+            ]
+        )
 
     def _unicode_input(self, codepoint: int, flags: int) -> INPUT:
-        return INPUT(type=1, ki=KEYBDINPUT(wScan=codepoint, dwFlags=self.KEYEVENTF_UNICODE | flags))
+        return INPUT(
+            type=1,
+            ki=KEYBDINPUT(wScan=codepoint, dwFlags=self.KEYEVENTF_UNICODE | flags),
+        )
 
     @staticmethod
-    def _send(inputs: object) -> None:
-        count = len(inputs)  # type: ignore[arg-type]
-        sent = user32.SendInput(count, inputs, ctypes.sizeof(INPUT))
-        if sent != count:
+    def _send(events: list[INPUT]) -> None:
+        inputs = (INPUT * len(events))(*events)
+        sent = user32.SendInput(len(inputs), inputs, ctypes.sizeof(INPUT))
+        if sent != len(inputs):
             raise OSError(ctypes.get_last_error(), "Windows rejected synthetic input")
 
 
@@ -117,11 +138,10 @@ class GlobalHotkeys:
             self._thread.join(timeout=1.0)
 
     def _run(self) -> None:
-        kernel32 = ctypes.windll.kernel32
         self._thread_id = kernel32.GetCurrentThreadId()
-        if not user32.RegisterHotKey(None, 1, 0, 0x77):  # F8
+        if not user32.RegisterHotKey(None, 1, 0, 0x77):
             LOGGER.warning("F8 is already registered by another application")
-        if not user32.RegisterHotKey(None, 2, 0, 0x78):  # F9
+        if not user32.RegisterHotKey(None, 2, 0, 0x78):
             LOGGER.warning("F9 is already registered by another application")
         message = wintypes.MSG()
         try:

@@ -27,16 +27,19 @@ class AppStore:
         try:
             raw = json.loads(self.state_path.read_text(encoding="utf-8"))
             profile = TypingProfile(**raw.get("profile", {})).normalized()
-            custom = [TextTemplate.from_dict(x) for x in raw.get("templates", []) if not x.get("builtin")]
-            selected = str(raw.get("selected_template_id", ""))
+            custom = [
+                TextTemplate.from_dict(item)
+                for item in raw.get("templates", [])
+                if not item.get("builtin")
+            ]
             return AppState(
                 profile=profile,
                 templates=builtins + custom,
-                selected_template_id=selected,
+                selected_template_id=str(raw.get("selected_template_id", "")),
                 window_width=max(1040, int(raw.get("window_width", 1240))),
                 window_height=max(680, int(raw.get("window_height", 780))),
             )
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError):
             backup = self.state_path.with_suffix(".broken.json")
             shutil.copy2(self.state_path, backup)
             return AppState(templates=builtins, selected_template_id=builtins[0].id)
@@ -44,10 +47,14 @@ class AppStore:
     def save(self, state: AppState) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         payload = state.to_dict()
-        payload["templates"] = [vars_template(x) for x in state.templates if not x.builtin]
-        fd, temporary = tempfile.mkstemp(prefix="state-", suffix=".json", dir=self.data_dir)
+        payload["templates"] = [
+            template_dict(item) for item in state.templates if not item.builtin
+        ]
+        descriptor, temporary = tempfile.mkstemp(
+            prefix="state-", suffix=".json", dir=self.data_dir
+        )
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -57,8 +64,14 @@ class AppStore:
                 os.unlink(temporary)
 
 
-def vars_template(item: TextTemplate) -> dict[str, object]:
-    return {"id": item.id, "title": item.title, "text": item.text, "category": item.category, "builtin": item.builtin}
+def template_dict(item: TextTemplate) -> dict[str, object]:
+    return {
+        "id": item.id,
+        "title": item.title,
+        "text": item.text,
+        "category": item.category,
+        "builtin": item.builtin,
+    }
 
 
 def new_template(title: str = "Новый шаблон", text: str = "") -> TextTemplate:
@@ -78,4 +91,7 @@ def builtin_templates() -> list[TextTemplate]:
         ("office", "Финальный босс", "С таким серьёзным тоном обычно объявляют квартальный отчёт. А тут одна фраза и уже ощущение будто началась последняя битва с бухгалтерией."),
         ("final", "Спокойный финал", "Ладно убедил. Не аргументами конечно а выносливостью. Я просто не был готов что эта мысль будет возвращаться каждый сезон."),
     ]
-    return [TextTemplate(id=i, title=t, text=x, category="Ирония", builtin=True) for i, t, x in rows]
+    return [
+        TextTemplate(id=item_id, title=title, text=text, category="Ирония", builtin=True)
+        for item_id, title, text in rows
+    ]
