@@ -17,6 +17,11 @@ def test_punctuation_is_slower_than_letters() -> None:
     assert mark > letter
 
 
+def test_message_cadence_stays_fast() -> None:
+    rhythm = RhythmEngine(TypingProfile(), random.Random(9))
+    assert max(rhythm.between_messages_pause(100) for _ in range(100)) < 0.63
+
+
 def test_profile_clamps_untrusted_values() -> None:
-    p = TypingProfile(wpm=9999, variation=-2, typo_rate=100).normalized()
-    assert (p.wpm, p.variation, p.typo_rate) == (280, 0, 7.0)
+    profile = TypingProfile(wpm=9999, variation=-2, typo_rate=100).normalized()
+    assert (profile.wpm, profile.variation, profile.typo_rate) == (280, 0, 40.0)

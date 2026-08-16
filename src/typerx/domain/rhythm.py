@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import random
 from dataclasses import dataclass
 
@@ -33,18 +32,11 @@ class RhythmEngine:
         return min(0.95, max(0.012, base * multiplier))
 
     def correction_pause(self) -> tuple[float, float]:
-        return self.rng.uniform(0.07, 0.22), self.rng.uniform(0.06, 0.18)
+        return self.rng.uniform(0.06, 0.17), self.rng.uniform(0.05, 0.14)
 
     def before_send_pause(self) -> float:
-        return self.rng.uniform(0.18, 0.56)
+        return self.rng.uniform(0.08, 0.24)
 
     def between_messages_pause(self, previous_length: int) -> float:
-        thought = min(1.4, math.log1p(previous_length) * 0.15)
-        return self.rng.uniform(0.58, 1.55) + thought * self.rng.random()
-
-    def should_typo(self, char: str) -> bool:
-        return (
-            self.profile.fix_typos
-            and char.isalpha()
-            and self.rng.random() < self.profile.typo_rate / 100.0
-        )
+        length_bonus = min(0.16, previous_length * 0.0025)
+        return self.rng.uniform(0.16, 0.46) + length_bonus * self.rng.random()

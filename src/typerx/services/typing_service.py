@@ -8,15 +8,8 @@ from collections.abc import Callable
 from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
+from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.platform.windows import WindowsInput
-
-_NEIGHBOURS = {
-    "а": "пвм", "б": "юьл", "в": "аып", "г": "ншр", "д": "лж", "е": "кн", "ё": "1й",
-    "ж": "дэ", "з": "хщ", "и": "мть", "й": "цф", "к": "уен", "л": "джо", "м": "сиа",
-    "н": "геп", "о": "лр", "п": "арн", "р": "от", "с": "мч", "т": "ьи", "у": "кц",
-    "ф": "йы", "х": "зъ", "ц": "уй", "ч": "ся", "ш": "щг", "щ": "шз", "ъ": "х",
-    "ы": "вф", "ь": "тб", "э": "ж", "ю": "б", "я": "чс",
-}
 
 
 class TypingCancelled(Exception):
@@ -41,24 +34,36 @@ class TypingService:
         self._cancel.clear()
         output = WindowsInput(target_window)
         rng = random.Random()
-        rhythm = RhythmEngine(profile.normalized(), rng)
+        normalized = profile.normalized()
+        rhythm = RhythmEngine(normalized, rng)
+        typo_planner = TypoPlanner(normalized.typo_rate if normalized.fix_typos else 0.0, rng)
         total = len(plan.messages)
-        for index, message in enumerate(plan.messages, start=1):
-            progress(index, total)
-            for char in message:
+
+        for message_index, message in enumerate(plan.messages, start=1):
+            progress(message_index, total)
+            typos = typo_planner.plan(message)
+            for char_index, char in enumerate(message):
                 self._check()
-                if rhythm.should_typo(char) and char.casefold() in _NEIGHBOURS:
-                    wrong = rng.choice(_NEIGHBOURS[char.casefold()])
-                    output.write(wrong.upper() if char.isupper() else wrong)
-                    before, after = rhythm.correction_pause()
-                    self._wait(before)
-                    output.backspace()
-                    self._wait(after)
-                output.write(char)
+                typo = typos.get(char_index)
+                if typo is not None and typo.kind is TypoKind.OMIT:
+                    self._wait(rhythm.character_delay(char) * 0.55)
+                    continue
+                if typo is not None:
+                    output.write(typo.replacement)
+                    self._wait(rhythm.character_delay(char))
+                    if typo.kind is TypoKind.CORRECTED:
+                        before, after = rhythm.correction_pause()
+                        self._wait(before)
+                        output.backspace()
+                        self._wait(after)
+                        output.write(char)
+                else:
+                    output.write(char)
                 self._wait(rhythm.character_delay(char))
+
             self._wait(rhythm.before_send_pause())
             output.enter()
-            if index < total:
+            if message_index < total:
                 self._wait(rhythm.between_messages_pause(len(message)))
 
     def _wait(self, duration: float) -> None:

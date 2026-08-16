@@ -9,7 +9,7 @@ class TypingProfile:
     name: str = "Natural"
     wpm: int = 105
     variation: int = 24
-    typo_rate: float = 1.2
+    typo_rate: float = 12.0
     smart_split: bool = True
     fix_typos: bool = True
     punctuation_pauses: bool = True
@@ -21,7 +21,7 @@ class TypingProfile:
             name=self.name[:40] or "Natural",
             wpm=max(25, min(280, int(self.wpm))),
             variation=max(0, min(55, int(self.variation))),
-            typo_rate=max(0.0, min(7.0, float(self.typo_rate))),
+            typo_rate=max(0.0, min(40.0, float(self.typo_rate))),
             smart_split=bool(self.smart_split),
             fix_typos=bool(self.fix_typos),
             punctuation_pauses=bool(self.punctuation_pauses),
@@ -51,7 +51,7 @@ class TextTemplate:
 
 @dataclass(slots=True)
 class AppState:
-    schema_version: int = 1
+    schema_version: int = 2
     profile: TypingProfile = field(default_factory=TypingProfile)
     templates: list[TextTemplate] = field(default_factory=list)
     selected_template_id: str = ""
