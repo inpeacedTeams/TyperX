@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import QCoreApplication, Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication
+
+from typerx.persistence.store import AppStore
+from typerx.ui.main_window import MainWindow
+
+
+def _configure_logging(data_dir: Path) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.FileHandler(data_dir / "typerx.log", encoding="utf-8")],
+    )
+
+
+def run() -> int:
+    QCoreApplication.setOrganizationName("TyperX")
+    QCoreApplication.setApplicationName("TyperX")
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setFont(QFont("Segoe UI Variable", 10))
+
+    store = AppStore.default()
+    _configure_logging(store.data_dir)
+    window = MainWindow(store)
+    window.show()
+    return app.exec()
