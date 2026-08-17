@@ -20,6 +20,15 @@ if IS_WINDOWS:
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
     user32.GetKeyboardLayout.argtypes = (wintypes.DWORD,)
     user32.GetKeyboardLayout.restype = wintypes.HKL
+    user32.LoadKeyboardLayoutW.argtypes = (wintypes.LPCWSTR, wintypes.UINT)
+    user32.LoadKeyboardLayoutW.restype = wintypes.HKL
+    user32.PostMessageW.argtypes = (
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    )
+    user32.PostMessageW.restype = wintypes.BOOL
     user32.VkKeyScanExW.argtypes = (wintypes.WCHAR, wintypes.HKL)
     user32.VkKeyScanExW.restype = ctypes.c_short
     user32.MapVirtualKeyExW.argtypes = (wintypes.UINT, wintypes.UINT, wintypes.HKL)
@@ -32,11 +41,15 @@ class DriverNotReadyError(RuntimeError):
 
 class InterceptionKeyboard:
     MAPVK_VK_TO_VSC_EX = 4
+    WM_INPUTLANGCHANGEREQUEST = 0x0050
+    KLF_ACTIVATE = 0x00000001
     VK_BACK = 0x08
     VK_RETURN = 0x0D
     VK_SHIFT = 0x10
     VK_CONTROL = 0x11
     VK_MENU = 0x12
+    RU_LAYOUT = "00000419"
+    EN_LAYOUT = "00000409"
 
     def __init__(self, target_window: int) -> None:
         if not IS_WINDOWS:
@@ -72,6 +85,52 @@ class InterceptionKeyboard:
         thread_id = user32.GetWindowThreadProcessId(self.target_window, None)
         return int(user32.GetKeyboardLayout(thread_id))
 
+    @staticmethod
+    def _layout_for(char: str) -> str | None:
+        folded = char.casefold()
+        if "а" <= folded <= "я" or folded == "ё":
+            return InterceptionKeyboard.RU_LAYOUT
+        if "a" <= folded <= "z":
+            return InterceptionKeyboard.EN_LAYOUT
+        return None
+
+    def _resolve_char(self, char: str) -> tuple[int, int, int]:
+        hkl = self._get_hkl()
+        result = int(user32.VkKeyScanExW(char, hkl))
+        if result != -1:
+            return result & 0xFF, (result >> 8) & 0xFF, hkl
+
+        layout_id = self._layout_for(char)
+        if layout_id is None:
+            raise DriverNotReadyError(
+                f"Character {char!r} is unavailable in the active keyboard layout"
+            )
+
+        requested_hkl = int(user32.LoadKeyboardLayoutW(layout_id, self.KLF_ACTIVATE))
+        if not requested_hkl:
+            raise DriverNotReadyError(
+                f"Windows keyboard layout {layout_id} is not installed"
+            )
+
+        self.assert_focus()
+        user32.PostMessageW(
+            self.target_window,
+            self.WM_INPUTLANGCHANGEREQUEST,
+            0,
+            requested_hkl,
+        )
+        # Let the target thread apply the layout before mapping and sending the key.
+        for _ in range(10):
+            time.sleep(0.01)
+            hkl = self._get_hkl()
+            result = int(user32.VkKeyScanExW(char, hkl))
+            if result != -1:
+                return result & 0xFF, (result >> 8) & 0xFF, hkl
+
+        raise DriverNotReadyError(
+            f"Could not switch the target window to layout {layout_id}"
+        )
+
     def _key_data(self, vk: int, hkl: int) -> tuple[int, int]:
         mapped = int(user32.MapVirtualKeyExW(vk, self.MAPVK_VK_TO_VSC_EX, hkl))
         scan = mapped & 0xFF
@@ -84,9 +143,10 @@ class InterceptionKeyboard:
         state = flags | (int(KeyFlag.KEY_UP) if key_up else int(KeyFlag.KEY_DOWN))
         self._context.send(self._keyboard, KeyStroke(scan, state))
 
-    def _tap_vk(self, vk: int, modifiers: int = 0) -> None:
+    def _tap_vk(self, vk: int, modifiers: int = 0, hkl: int | None = None) -> None:
         self.assert_focus()
-        hkl = self._get_hkl()
+        if hkl is None:
+            hkl = self._get_hkl()
         modifier_vks: list[int] = []
         if modifiers & 1:
             modifier_vks.append(self.VK_SHIFT)
@@ -101,8 +161,6 @@ class InterceptionKeyboard:
             self._send(mod_scan, mod_flags)
 
         self._send(scan, flags)
-        # A real key has measurable hold time, but this time is part of the requested
-        # character interval and must not be added on top of the selected WPM.
         time.sleep(self._rng.uniform(0.018, 0.038))
         self._send(scan, flags, key_up=True)
 
@@ -112,12 +170,8 @@ class InterceptionKeyboard:
     def write(self, char: str) -> None:
         if len(char) != 1:
             raise ValueError("write() accepts exactly one character")
-        result = int(user32.VkKeyScanExW(char, self._get_hkl()))
-        if result == -1:
-            raise DriverNotReadyError(
-                f"Character {char!r} is unavailable in the active keyboard layout"
-            )
-        self._tap_vk(result & 0xFF, (result >> 8) & 0xFF)
+        vk, modifiers, hkl = self._resolve_char(char)
+        self._tap_vk(vk, modifiers, hkl)
 
     def enter(self) -> None:
         self._tap_vk(self.VK_RETURN)
