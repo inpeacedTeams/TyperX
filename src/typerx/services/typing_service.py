@@ -9,7 +9,7 @@ from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
 from typerx.domain.typos import TypoKind, TypoPlanner
-from typerx.platform.interception_keyboard import InterceptionKeyboard
+from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
 
 
 class TypingCancelled(Exception):
@@ -33,6 +33,7 @@ class TypingService:
     ) -> None:
         self._cancel.clear()
         output = InterceptionKeyboard(target_window)
+        pending: list[tuple[float, PressedKey]] = []
         try:
             rng = random.Random()
             normalized = profile.normalized()
@@ -45,21 +46,38 @@ class TypingService:
             total = len(plan.messages)
             previous: str | None = None
 
-            def emit_char(value: str) -> None:
+            def wait_until(deadline: float) -> None:
+                while pending:
+                    release_at, key = min(pending, key=lambda item: item[0])
+                    if release_at > deadline:
+                        break
+                    self._wait(max(0.0, release_at - time.perf_counter()))
+                    output.release(key)
+                    pending.remove((release_at, key))
+                self._wait(max(0.0, deadline - time.perf_counter()))
+
+            def flush_pending() -> None:
+                while pending:
+                    release_at, key = min(pending, key=lambda item: item[0])
+                    self._wait(max(0.0, release_at - time.perf_counter()))
+                    output.release(key)
+                    pending.remove((release_at, key))
+
+            def emit(value: str, press: Callable[[], PressedKey]) -> None:
                 nonlocal previous
                 self._check()
                 dwell, flight = rhythm.keystroke_timing(value, previous)
-                output.write(value, dwell)
-                self._wait(flight)
+                down_at = time.perf_counter()
+                key = press()
+                pending.append((down_at + dwell, key))
+                wait_until(down_at + max(0.018, dwell + flight))
                 previous = value
 
+            def emit_char(value: str) -> None:
+                emit(value, lambda: output.press(value))
+
             def emit_backspace() -> None:
-                nonlocal previous
-                self._check()
-                dwell, flight = rhythm.keystroke_timing("\b", previous)
-                output.backspace(dwell)
-                self._wait(flight)
-                previous = "\b"
+                emit("\b", output.press_backspace)
 
             for message_index, message in enumerate(plan.messages, start=1):
                 progress(message_index, total)
@@ -71,22 +89,29 @@ class TypingService:
                     if typo is not None:
                         emit_char(typo.replacement)
                         if typo.kind is TypoKind.CORRECTED:
+                            flush_pending()
                             before, after = rhythm.correction_pause()
                             self._wait(before)
                             emit_backspace()
+                            flush_pending()
                             self._wait(after)
                             emit_char(char)
                     else:
                         emit_char(char)
 
+                flush_pending()
                 self._wait(rhythm.before_send_pause())
-                dwell, flight = rhythm.keystroke_timing("\n", previous)
-                output.enter(dwell)
-                self._wait(flight)
+                emit("\n", output.press_enter)
+                flush_pending()
                 previous = "\n"
                 if message_index < total:
                     self._wait(rhythm.between_messages_pause(len(message)))
         finally:
+            for _, key in pending:
+                try:
+                    output.release(key)
+                except Exception:
+                    pass
             output.close()
 
     def _wait(self, duration: float) -> None:
