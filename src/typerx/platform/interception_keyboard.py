@@ -4,6 +4,7 @@ import ctypes
 import random
 import time
 from ctypes import wintypes
+from dataclasses import dataclass
 
 from interception.constants import KeyFlag
 from interception.interception import Interception
@@ -39,6 +40,13 @@ class DriverNotReadyError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class PressedKey:
+    scan: int
+    flags: int
+    modifiers: tuple[tuple[int, int], ...]
+
+
 class InterceptionKeyboard:
     MAPVK_VK_TO_VSC_EX = 4
     WM_INPUTLANGCHANGEREQUEST = 0x0050
@@ -57,6 +65,7 @@ class InterceptionKeyboard:
         self.target_window = target_window
         self._rng = random.Random()
         self._context = Interception()
+        self._held_modifiers: dict[tuple[int, int], int] = {}
         if not self._context.valid:
             raise DriverNotReadyError(
                 "Interception driver is not installed. Run install_driver.bat as administrator, "
@@ -105,7 +114,6 @@ class InterceptionKeyboard:
             raise DriverNotReadyError(
                 f"Character {char!r} is unavailable in the active keyboard layout"
             )
-
         requested_hkl = int(user32.LoadKeyboardLayoutW(layout_id, self.KLF_ACTIVATE))
         if not requested_hkl:
             raise DriverNotReadyError(f"Windows keyboard layout {layout_id} is not installed")
@@ -118,7 +126,6 @@ class InterceptionKeyboard:
             result = int(user32.VkKeyScanExW(char, hkl))
             if result != -1:
                 return result & 0xFF, (result >> 8) & 0xFF, hkl
-
         raise DriverNotReadyError(f"Could not switch the target window to layout {layout_id}")
 
     def _key_data(self, vk: int, hkl: int) -> tuple[int, int]:
@@ -133,13 +140,7 @@ class InterceptionKeyboard:
         state = flags | (int(KeyFlag.KEY_UP) if key_up else int(KeyFlag.KEY_DOWN))
         self._context.send(self._keyboard, KeyStroke(scan, state))
 
-    def _tap_vk(
-        self,
-        vk: int,
-        modifiers: int = 0,
-        hkl: int | None = None,
-        hold_seconds: float | None = None,
-    ) -> None:
+    def _press_vk(self, vk: int, modifiers: int = 0, hkl: int | None = None) -> PressedKey:
         self.assert_focus()
         if hkl is None:
             hkl = self._get_hkl()
@@ -151,30 +152,52 @@ class InterceptionKeyboard:
         if modifiers & 4:
             modifier_vks.append(self.VK_MENU)
 
-        modifier_data = [self._key_data(mod, hkl) for mod in modifier_vks]
+        modifier_data = tuple(self._key_data(modifier, hkl) for modifier in modifier_vks)
+        for modifier in modifier_data:
+            count = self._held_modifiers.get(modifier, 0)
+            if count == 0:
+                self._send(*modifier)
+            self._held_modifiers[modifier] = count + 1
+
         scan, flags = self._key_data(vk, hkl)
-        for mod_scan, mod_flags in modifier_data:
-            self._send(mod_scan, mod_flags)
-
         self._send(scan, flags)
-        hold = self._rng.uniform(0.018, 0.038) if hold_seconds is None else hold_seconds
-        time.sleep(min(0.25, max(0.008, hold)))
-        self._send(scan, flags, key_up=True)
+        return PressedKey(scan, flags, modifier_data)
 
-        for mod_scan, mod_flags in reversed(modifier_data):
-            self._send(mod_scan, mod_flags, key_up=True)
+    def release(self, key: PressedKey) -> None:
+        self._send(key.scan, key.flags, key_up=True)
+        for modifier in reversed(key.modifiers):
+            count = self._held_modifiers.get(modifier, 0) - 1
+            if count <= 0:
+                self._held_modifiers.pop(modifier, None)
+                self._send(*modifier, key_up=True)
+            else:
+                self._held_modifiers[modifier] = count
+
+    def press(self, char: str) -> PressedKey:
+        if len(char) != 1:
+            raise ValueError("press() accepts exactly one character")
+        vk, modifiers, hkl = self._resolve_char(char)
+        return self._press_vk(vk, modifiers, hkl)
+
+    def press_enter(self) -> PressedKey:
+        return self._press_vk(self.VK_RETURN)
+
+    def press_backspace(self) -> PressedKey:
+        return self._press_vk(self.VK_BACK)
+
+    def _tap(self, key: PressedKey, hold_seconds: float | None = None) -> None:
+        hold = self._rng.uniform(0.065, 0.105) if hold_seconds is None else hold_seconds
+        time.sleep(min(0.25, max(0.025, hold)))
+        self.release(key)
 
     def write(self, char: str, hold_seconds: float | None = None) -> None:
-        if len(char) != 1:
-            raise ValueError("write() accepts exactly one character")
-        vk, modifiers, hkl = self._resolve_char(char)
-        self._tap_vk(vk, modifiers, hkl, hold_seconds)
+        self._tap(self.press(char), hold_seconds)
 
     def enter(self, hold_seconds: float | None = None) -> None:
-        self._tap_vk(self.VK_RETURN, hold_seconds=hold_seconds)
+        self._tap(self.press_enter(), hold_seconds)
 
     def backspace(self, hold_seconds: float | None = None) -> None:
-        self._tap_vk(self.VK_BACK, hold_seconds=hold_seconds)
+        self._tap(self.press_backspace(), hold_seconds)
 
     def close(self) -> None:
         self._context.destroy()
