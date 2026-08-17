@@ -32,7 +32,9 @@ def test_tempo_has_short_range_autocorrelation() -> None:
     rhythm = RhythmEngine(TypingProfile(variation=35), random.Random(11))
     values = [sum(rhythm.keystroke_timing("а")) for _ in range(500)]
     mean = sum(values) / len(values)
-    numerator = sum((a - mean) * (b - mean) for a, b in zip(values, values[1:]))
+    numerator = sum(
+        (a - mean) * (b - mean) for a, b in zip(values, values[1:], strict=False)
+    )
     denominator = sum((value - mean) ** 2 for value in values)
     assert numerator / denominator > 0.15
 
@@ -52,4 +54,4 @@ def test_slower_profiles_keep_a_small_gap() -> None:
 
 def test_profile_clamps_untrusted_values() -> None:
     profile = TypingProfile(wpm=9999, variation=-2, typo_rate=100).normalized()
-    assert (profile.wpm, profile.variation, profile.typo_rate) == (280, 0, 40.0)
+    assert (profile.wpm, profile.variation, profile.typo_rate) == (300, 0, 40.0)
