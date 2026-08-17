@@ -27,15 +27,10 @@ class Typo:
 
 
 class TypoPlanner:
-    """Plans at most one realistic mistake per word.
-
-    Most mistakes remain visible, like normal rushed chat. A smaller share is noticed and
-    corrected with Backspace. Planning per word prevents unnatural typo clusters.
-    """
-
-    def __init__(self, rate: float, rng: random.Random) -> None:
+    def __init__(self, rate: float, rng: random.Random, correct_typos: bool = True) -> None:
         self.rate = max(0.0, min(40.0, rate)) / 100.0
         self.rng = rng
+        self.correct_typos = correct_typos
 
     def plan(self, text: str) -> dict[int, Typo]:
         actions: dict[int, Typo] = {}
@@ -53,24 +48,20 @@ class TypoPlanner:
         length = end - start
         if length < 3 or self.rng.random() >= self.rate:
             return
-
         candidates = [
-            index
-            for index in range(start + 1, end - 1 if length >= 5 else end)
+            index for index in range(start + 1, end - 1 if length >= 5 else end)
             if text[index].casefold() in _NEIGHBOURS
         ]
         if not candidates:
             return
-
         index = self.rng.choice(candidates)
         original = text[index]
         roll = self.rng.random()
         if length >= 4 and roll < 0.38:
             actions[index] = Typo(index, TypoKind.OMIT)
             return
-
         replacement = self.rng.choice(_NEIGHBOURS[original.casefold()])
         if original.isupper():
             replacement = replacement.upper()
-        kind = TypoKind.SUBSTITUTE if roll < 0.82 else TypoKind.CORRECTED
+        kind = TypoKind.CORRECTED if self.correct_typos and roll >= 0.82 else TypoKind.SUBSTITUTE
         actions[index] = Typo(index, kind, replacement)

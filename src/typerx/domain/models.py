@@ -13,6 +13,7 @@ class TypingProfile:
     words_per_message: int = 5
     smart_split: bool = True
     fix_typos: bool = True
+    correct_typos: bool = True
     punctuation_pauses: bool = True
     keep_punctuation: bool = True
     countdown_seconds: int = 3
@@ -26,6 +27,7 @@ class TypingProfile:
             words_per_message=max(1, min(16, int(self.words_per_message))),
             smart_split=bool(self.smart_split),
             fix_typos=bool(self.fix_typos),
+            correct_typos=bool(self.correct_typos),
             punctuation_pauses=bool(self.punctuation_pauses),
             keep_punctuation=bool(self.keep_punctuation),
             countdown_seconds=max(0, min(10, int(self.countdown_seconds))),
@@ -53,7 +55,7 @@ class TextTemplate:
 
 @dataclass(slots=True)
 class AppState:
-    schema_version: int = 3
+    schema_version: int = 4
     profile: TypingProfile = field(default_factory=TypingProfile)
     templates: list[TextTemplate] = field(default_factory=list)
     selected_template_id: str = ""
