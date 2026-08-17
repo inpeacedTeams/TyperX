@@ -6,7 +6,6 @@ import time
 from collections.abc import Callable
 
 from typerx.domain.models import TypingProfile
-from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
 from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.platform.interception_keyboard import InterceptionKeyboard
@@ -36,45 +35,53 @@ class TypingService:
         try:
             rng = random.Random()
             normalized = profile.normalized()
-            rhythm = RhythmEngine(normalized, rng)
             typo_planner = TypoPlanner(
                 normalized.typo_rate if normalized.fix_typos else 0.0, rng
             )
             total = len(plan.messages)
 
+            # TypeStats uses the standard conversion: 1 word = 5 characters.
+            # Absolute deadlines prevent driver key-hold time, scheduler latency and
+            # accumulated sleep error from lowering the measured WPM.
+            interval = 60.0 / (normalized.wpm * 5.0)
+            next_deadline = time.perf_counter()
+            emitted = 0
+
+            def emit(action) -> None:
+                nonlocal next_deadline, emitted
+                self._check()
+                action()
+                emitted += 1
+                next_deadline += interval
+                remaining = next_deadline - time.perf_counter()
+                if remaining > 0:
+                    self._wait(remaining)
+                elif remaining < -interval * 3:
+                    # Do not generate a catch-up burst after an OS stall.
+                    next_deadline = time.perf_counter()
+
             for message_index, message in enumerate(plan.messages, start=1):
                 progress(message_index, total)
                 typos = typo_planner.plan(message)
-                for char_index, char in enumerate(message):
-                    self._check()
-                    target_interval = rhythm.character_delay(char)
-                    cycle_started = time.perf_counter()
-                    typo = typos.get(char_index)
 
+                for char_index, char in enumerate(message):
+                    typo = typos.get(char_index)
                     if typo is not None and typo.kind is TypoKind.OMIT:
-                        self._wait(target_interval * 0.55)
                         continue
 
                     if typo is not None:
-                        output.write(typo.replacement)
+                        emit(lambda value=typo.replacement: output.write(value))
                         if typo.kind is TypoKind.CORRECTED:
-                            before, after = rhythm.correction_pause()
-                            self._wait(before)
-                            output.backspace()
-                            self._wait(after)
-                            output.write(char)
+                            emit(output.backspace)
+                            emit(lambda value=char: output.write(value))
                     else:
-                        output.write(char)
+                        emit(lambda value=char: output.write(value))
 
-                    # Driver key-down/key-up time is already elapsed. Subtract it instead
-                    # of adding a second delay, so selected WPM equals observed chat WPM.
-                    elapsed = time.perf_counter() - cycle_started
-                    self._wait(max(0.0, target_interval - elapsed))
+                # Enter is a real key event and participates in the same measured cadence.
+                emit(output.enter)
 
-                self._wait(rhythm.before_send_pause())
-                output.enter()
-                if message_index < total:
-                    self._wait(rhythm.between_messages_pause(len(message)))
+            # Keep the variable referenced for diagnostics/profiling without changing pace.
+            del emitted
         finally:
             output.close()
 
