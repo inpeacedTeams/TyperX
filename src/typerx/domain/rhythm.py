@@ -24,7 +24,7 @@ class RhythmEngine:
 
     def keystroke_timing(self, char: str, previous: str | None = None) -> tuple[float, float]:
         if self._phrase_left <= 0:
-            self._phrase = self.rng.uniform(0.82, 1.20)
+            self._phrase = self.rng.uniform(0.70, 1.45)
             self._phrase_left = self.rng.randint(4, 15)
         self._phrase_left -= 1
 
@@ -36,21 +36,20 @@ class RhythmEngine:
             + self.rng.gauss(0.0, 0.38 + variation * 0.25)
         )
 
-        # Onset interval controls rhythm. Persistent latent state and phrase-level
-        # drift avoid both metronomic timing and implausible white-noise arrhythmia.
+        # Phrase-level drift, correlated tempo, and moderate per-key variation
+        # reproduce arrhythmia without either a metronome or white-noise timing.
         base_interval = 60.0 / (max(25, self.profile.wpm) * 5.0)
         onset_interval = base_interval * self._phrase
-        onset_interval *= math.exp(self._tempo * (0.10 + variation * 0.16))
-        onset_interval *= math.exp(self.rng.gauss(0.0, 0.025 + variation * 0.09))
+        onset_interval *= math.exp(self._tempo * (0.15 + variation * 0.20))
+        onset_interval *= math.exp(self.rng.gauss(0.0, 0.07 + variation * 0.20))
 
         if char.isspace():
-            onset_interval *= self.rng.uniform(0.82, 1.10)
+            onset_interval *= self.rng.uniform(0.82, 1.15)
         elif previous and previous.casefold() == char.casefold():
             onset_interval *= self.rng.uniform(1.12, 1.30)
 
-        # Real sample supplied for calibration clusters around 50-115 ms, with a
-        # thinner tail toward 170 ms. Dwell is related to tempo but not derived
-        # from the onset interval, allowing realistic overlap at high speed.
+        # Calibrated from the supplied live sample: most holds are 50-115 ms,
+        # with a thinner tail toward 170 ms.
         dwell = 0.086 * math.exp(self._touch * (0.10 + variation * 0.08))
         dwell *= math.exp(self.rng.gauss(0.0, 0.11 + variation * 0.10))
         if char.isspace():
@@ -64,10 +63,11 @@ class RhythmEngine:
         elif self.profile.punctuation_pauses and char in ".!?…":
             onset_interval += base_interval * self.rng.uniform(2.0, 4.2)
 
-        # Sparse thought hesitations create a natural right tail without turning
-        # the whole sequence into erratic noise.
-        if not char.isspace() and self.rng.random() < 0.012 + variation * 0.018:
-            onset_interval += self.rng.uniform(0.08, 0.24) * self._speed_factor()
+        # A small right tail of thought/coordination pauses is present in the
+        # sample and keeps the overlap ratio from becoming mechanically uniform.
+        hesitation_rate = 0.025 + variation * 0.05
+        if not char.isspace() and self.rng.random() < hesitation_rate:
+            onset_interval += self.rng.uniform(0.06, 0.20) * self._speed_factor()
 
         onset_interval = min(0.95, max(0.018, onset_interval))
         flight = min(0.80, max(-0.060, onset_interval - dwell))

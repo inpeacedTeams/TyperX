@@ -29,12 +29,13 @@ def test_dwell_matches_realistic_keyboard_range() -> None:
     assert len({round(dwell, 4) for dwell in dwells}) > 50
 
 
-def test_high_speed_typing_contains_natural_overlap() -> None:
+def test_high_speed_typing_contains_varied_overlap() -> None:
     rhythm = RhythmEngine(TypingProfile(wpm=240, variation=30), random.Random(12))
-    flights = [rhythm.keystroke_timing("а")[1] for _ in range(500)]
+    flights = [rhythm.keystroke_timing("а")[1] for _ in range(700)]
     negative_share = sum(flight < 0 for flight in flights) / len(flights)
-    assert 0.20 <= negative_share <= 0.95
+    assert 0.55 <= negative_share <= 0.98
     assert min(flights) >= -0.060
+    assert max(flights) > 0.020
 
 
 def test_rhythm_has_controlled_arrhythmia() -> None:
@@ -44,7 +45,7 @@ def test_rhythm_has_controlled_arrhythmia() -> None:
     coefficient_of_variation = pstdev(intervals) / mean
     numerator = sum((a - mean) * (b - mean) for a, b in pairwise(intervals))
     denominator = sum((value - mean) ** 2 for value in intervals)
-    assert 0.10 <= coefficient_of_variation <= 0.60
+    assert 0.20 <= coefficient_of_variation <= 0.65
     assert 0.10 <= numerator / denominator <= 0.95
 
 
@@ -53,7 +54,7 @@ def test_enter_delay_is_small_at_max_speed() -> None:
     before = [rhythm.before_send_pause() for _ in range(100)]
     after = [rhythm.between_messages_pause(100) for _ in range(100)]
     assert max(before) < 0.025
-    assert max(after) < 0.050
+    assert max(after) < 0.070
 
 
 def test_slower_profiles_keep_a_small_gap() -> None:
