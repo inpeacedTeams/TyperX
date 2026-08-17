@@ -47,13 +47,16 @@ class TypingService:
                 typos = typo_planner.plan(message)
                 for char_index, char in enumerate(message):
                     self._check()
+                    target_interval = rhythm.character_delay(char)
+                    cycle_started = time.perf_counter()
                     typo = typos.get(char_index)
+
                     if typo is not None and typo.kind is TypoKind.OMIT:
-                        self._wait(rhythm.character_delay(char) * 0.55)
+                        self._wait(target_interval * 0.55)
                         continue
+
                     if typo is not None:
                         output.write(typo.replacement)
-                        self._wait(rhythm.character_delay(char))
                         if typo.kind is TypoKind.CORRECTED:
                             before, after = rhythm.correction_pause()
                             self._wait(before)
@@ -62,7 +65,11 @@ class TypingService:
                             output.write(char)
                     else:
                         output.write(char)
-                    self._wait(rhythm.character_delay(char))
+
+                    # Driver key-down/key-up time is already elapsed. Subtract it instead
+                    # of adding a second delay, so selected WPM equals observed chat WPM.
+                    elapsed = time.perf_counter() - cycle_started
+                    self._wait(max(0.0, target_interval - elapsed))
 
                 self._wait(rhythm.before_send_pause())
                 output.enter()

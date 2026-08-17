@@ -16,10 +16,7 @@ IS_WINDOWS = hasattr(ctypes, "WinDLL")
 if IS_WINDOWS:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetForegroundWindow.restype = wintypes.HWND
-    user32.GetWindowThreadProcessId.argtypes = (
-        wintypes.HWND,
-        ctypes.POINTER(wintypes.DWORD),
-    )
+    user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
     user32.GetKeyboardLayout.argtypes = (wintypes.DWORD,)
     user32.GetKeyboardLayout.restype = wintypes.HKL
@@ -34,12 +31,6 @@ class DriverNotReadyError(RuntimeError):
 
 
 class InterceptionKeyboard:
-    """Keyboard backend that emits scan codes through the Interception driver.
-
-    These events enter the Windows keyboard stack below SendInput. Low-level keyboard
-    hooks therefore receive ordinary keyboard events, including down/up timing.
-    """
-
     MAPVK_VK_TO_VSC_EX = 4
     VK_BACK = 0x08
     VK_RETURN = 0x0D
@@ -67,10 +58,7 @@ class InterceptionKeyboard:
                     return index
             except OSError:
                 continue
-        raise DriverNotReadyError(
-            "No keyboard was found by the Interception driver. Reconnect the keyboard or "
-            "reinstall the driver and reboot."
-        )
+        raise DriverNotReadyError("No keyboard was found by the Interception driver")
 
     @staticmethod
     def foreground_window() -> int:
@@ -107,29 +95,27 @@ class InterceptionKeyboard:
         if modifiers & 4:
             modifier_vks.append(self.VK_MENU)
 
-        modifier_data = [(m, *self._key_data(m, hkl)) for m in modifier_vks]
+        modifier_data = [self._key_data(mod, hkl) for mod in modifier_vks]
         scan, flags = self._key_data(vk, hkl)
-        for _, mod_scan, mod_flags in modifier_data:
+        for mod_scan, mod_flags in modifier_data:
             self._send(mod_scan, mod_flags)
-            time.sleep(self._rng.uniform(0.008, 0.022))
 
         self._send(scan, flags)
-        time.sleep(self._rng.uniform(0.048, 0.102))
+        # A real key has measurable hold time, but this time is part of the requested
+        # character interval and must not be added on top of the selected WPM.
+        time.sleep(self._rng.uniform(0.018, 0.038))
         self._send(scan, flags, key_up=True)
 
-        for _, mod_scan, mod_flags in reversed(modifier_data):
-            time.sleep(self._rng.uniform(0.006, 0.018))
+        for mod_scan, mod_flags in reversed(modifier_data):
             self._send(mod_scan, mod_flags, key_up=True)
 
     def write(self, char: str) -> None:
         if len(char) != 1:
             raise ValueError("write() accepts exactly one character")
-        hkl = self._get_hkl()
-        result = int(user32.VkKeyScanExW(char, hkl))
+        result = int(user32.VkKeyScanExW(char, self._get_hkl()))
         if result == -1:
             raise DriverNotReadyError(
-                f"Character {char!r} is unavailable in the active keyboard layout. "
-                "Switch the target window to the correct language."
+                f"Character {char!r} is unavailable in the active keyboard layout"
             )
         self._tap_vk(result & 0xFF, (result >> 8) & 0xFF)
 
