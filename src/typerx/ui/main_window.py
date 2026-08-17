@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         self.preview = QListWidget(); self.preview.setMinimumHeight(160); layout.addWidget(self.preview, 2); self.save = QPushButton("Сохранить изменения"); self.save.clicked.connect(self._save_current); layout.addWidget(self.save); return panel
 
     def _settings_panel(self):
-        panel, layout = self._panel(); layout.addWidget(self._eyebrow("РИТМ")); self.wpm, self.wpm_value = self._slider(layout, "Скорость", 25, 280)
+        panel, layout = self._panel(); layout.addWidget(self._eyebrow("РИТМ")); self.wpm, self.wpm_value = self._slider(layout, "Скорость", 25, 300)
         self.variation, self.variation_value = self._slider(layout, "Разброс", 0, 55); self.typos, self.typos_value = self._slider(layout, "Опечатки", 0, 40)
         layout.addSpacing(8); layout.addWidget(self._eyebrow("ПОВЕДЕНИЕ")); self.smart = QCheckBox("Умно делить на сообщения"); self.fix_typos = QCheckBox("Добавлять живые опечатки")
         self.pause_marks = QCheckBox("Задумываться после знаков"); self.keep_marks = QCheckBox("Сохранять пунктуацию")
@@ -184,7 +184,6 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Фокус на Telegram: старт через {remaining}"); QTimer.singleShot(1000, lambda: self._countdown(remaining - 1))
 
     def _hotkey_start(self): pass
-
     def _typing_progress(self, current, total): self.status.setText(f"Печатаю {current} из {total}")
     def _typing_finished(self, message): self.status.setText(message)
     def _typing_failed(self, message): self.status.setText("Остановлено"); self._error(message)

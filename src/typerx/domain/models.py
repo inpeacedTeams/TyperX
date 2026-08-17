@@ -20,7 +20,7 @@ class TypingProfile:
     def normalized(self) -> "TypingProfile":
         return TypingProfile(
             name=self.name[:40] or "Natural",
-            wpm=max(25, min(280, int(self.wpm))),
+            wpm=max(25, min(300, int(self.wpm))),
             variation=max(0, min(55, int(self.variation))),
             typo_rate=max(0.0, min(40.0, float(self.typo_rate))),
             words_per_message=max(1, min(16, int(self.words_per_message))),
