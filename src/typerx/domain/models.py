@@ -16,6 +16,7 @@ class TypingProfile:
     correct_typos: bool = True
     punctuation_pauses: bool = True
     keep_punctuation: bool = True
+    auto_123_challenge: bool = False
     countdown_seconds: int = 3
 
     def normalized(self) -> "TypingProfile":
@@ -30,6 +31,7 @@ class TypingProfile:
             correct_typos=bool(self.correct_typos),
             punctuation_pauses=bool(self.punctuation_pauses),
             keep_punctuation=bool(self.keep_punctuation),
+            auto_123_challenge=bool(self.auto_123_challenge),
             countdown_seconds=max(0, min(10, int(self.countdown_seconds))),
         )
 
@@ -55,7 +57,7 @@ class TextTemplate:
 
 @dataclass(slots=True)
 class AppState:
-    schema_version: int = 4
+    schema_version: int = 5
     profile: TypingProfile = field(default_factory=TypingProfile)
     templates: list[TextTemplate] = field(default_factory=list)
     selected_template_id: str = ""

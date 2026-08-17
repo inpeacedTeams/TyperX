@@ -49,18 +49,28 @@ class MainWindow(MainWindowView):
         self.correct_typos.setToolTip("Выключи, чтобы TyperX оставлял опечатки без Backspace-исправлений")
         self.correct_typos.toggled.connect(self._settings_changed)
         layout.insertWidget(13, self.correct_typos)
+
+        self.auto_123 = QCheckBox("Автоответ на запрос 123")
+        self.auto_123.setToolTip(
+            "Следить за новыми сообщениями 123/123 оба, прерывать текущую строку, "
+            "отправлять 123 и продолжать основной текст"
+        )
+        self.auto_123.toggled.connect(self._settings_changed)
+        layout.insertWidget(14, self.auto_123)
         return panel
 
     def _load_profile(self, profile: TypingProfile) -> None:
         super()._load_profile(profile)
         self.words.setValue(profile.words_per_message)
         self.correct_typos.setChecked(profile.correct_typos)
+        self.auto_123.setChecked(profile.auto_123_challenge)
         self._refresh_labels()
 
     def _profile(self) -> TypingProfile:
         profile = super()._profile()
         profile.words_per_message = self.words.value()
         profile.correct_typos = self.correct_typos.isChecked()
+        profile.auto_123_challenge = self.auto_123.isChecked()
         return profile.normalized()
 
     def _refresh_labels(self) -> None:
@@ -97,7 +107,8 @@ class MainWindow(MainWindowView):
         self.worker_thread.finished.connect(self._thread_cleared)
         self.start.setEnabled(False)
         self.stop.setEnabled(True)
-        self.status.setText("Запускаю ввод…")
+        suffix = " · слежу за 123" if self.auto_123.isChecked() else ""
+        self.status.setText(f"Запускаю ввод…{suffix}")
         self.worker_thread.start()
 
     @Slot()

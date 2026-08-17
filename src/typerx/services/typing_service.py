@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import random
+import re
 import threading
 import time
 from collections.abc import Callable
+
+import pythoncom
+from pywinauto import Desktop
 
 from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
@@ -14,6 +18,68 @@ from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedK
 
 class TypingCancelled(Exception):
     pass
+
+
+class ChallengeWatcher:
+    _PATTERN = re.compile(r"^123(?:\s+оба)?[.!?]?$", re.IGNORECASE)
+
+    def __init__(self, target_window: int) -> None:
+        self.target_window = target_window
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._pending = threading.Event()
+        self._seen: set[tuple[object, str]] = set()
+        self._suppress_until = 0.0
+        self._thread = threading.Thread(target=self._run, name="typerx-123-watch", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+        self._ready.wait(timeout=1.5)
+
+    def consume(self) -> bool:
+        if not self._pending.is_set():
+            return False
+        self._pending.clear()
+        return True
+
+    def suppress_own_reply(self) -> None:
+        self._suppress_until = time.monotonic() + 1.5
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+    def _snapshot(self) -> set[tuple[object, str]]:
+        window = Desktop(backend="uia").window(handle=self.target_window)
+        result: set[tuple[object, str]] = set()
+        for control in window.descendants(control_type="Text"):
+            text = control.window_text().strip()
+            if not text:
+                continue
+            runtime_id = tuple(control.element_info.runtime_id or ())
+            result.add((runtime_id, text))
+        return result
+
+    def _run(self) -> None:
+        pythoncom.CoInitialize()
+        try:
+            try:
+                self._seen = self._snapshot()
+            finally:
+                self._ready.set()
+            while not self._stop.wait(0.25):
+                try:
+                    current = self._snapshot()
+                except Exception:
+                    continue
+                new_items = current - self._seen
+                self._seen.update(current)
+                if time.monotonic() < self._suppress_until:
+                    continue
+                if any(self._PATTERN.fullmatch(text) for _, text in new_items):
+                    self._pending.set()
+        finally:
+            pythoncom.CoUninitialize()
 
 
 class TypingService:
@@ -34,7 +100,10 @@ class TypingService:
         self._cancel.clear()
         output = InterceptionKeyboard(target_window)
         pending: list[tuple[float, PressedKey]] = []
+        watcher = ChallengeWatcher(target_window) if profile.auto_123_challenge else None
         try:
+            if watcher is not None:
+                watcher.start()
             rng = random.Random()
             normalized = profile.normalized()
             rhythm = RhythmEngine(normalized, rng)
@@ -79,10 +148,28 @@ class TypingService:
             def emit_backspace() -> None:
                 emit("\b", output.press_backspace)
 
+            def answer_challenge() -> None:
+                nonlocal previous
+                if watcher is None or not watcher.consume():
+                    return
+                flush_pending()
+                emit("\n", output.press_enter)
+                flush_pending()
+                self._wait(rng.uniform(0.08, 0.20))
+                for digit in "123":
+                    emit_char(digit)
+                flush_pending()
+                emit("\n", output.press_enter)
+                flush_pending()
+                watcher.suppress_own_reply()
+                self._wait(rng.uniform(0.06, 0.16))
+                previous = "\n"
+
             for message_index, message in enumerate(plan.messages, start=1):
                 progress(message_index, total)
                 typos = typo_planner.plan(message)
                 for char_index, char in enumerate(message):
+                    answer_challenge()
                     typo = typos.get(char_index)
                     if typo is not None and typo.kind is TypoKind.OMIT:
                         continue
@@ -99,6 +186,7 @@ class TypingService:
                     else:
                         emit_char(char)
 
+                answer_challenge()
                 flush_pending()
                 self._wait(rhythm.before_send_pause())
                 emit("\n", output.press_enter)
@@ -107,6 +195,8 @@ class TypingService:
                 if message_index < total:
                     self._wait(rhythm.between_messages_pause(len(message)))
         finally:
+            if watcher is not None:
+                watcher.close()
             for _, key in pending:
                 try:
                     output.release(key)
