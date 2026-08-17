@@ -41,9 +41,10 @@ class TypingWorker(QObject):
             self.finished.emit("Остановлено")
         except FocusChangedError as exc:
             self.failed.emit(str(exc))
-        except Exception:
+        except Exception as exc:
             LOGGER.exception("Typing worker failed")
-            self.failed.emit("Ввод остановлен из-за системной ошибки")
+            detail = str(exc).strip() or exc.__class__.__name__
+            self.failed.emit(f"Ошибка ввода: {detail}")
 
 
 class MainWindow(QMainWindow):
