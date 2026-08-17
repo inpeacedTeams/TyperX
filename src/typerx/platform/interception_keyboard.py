@@ -108,18 +108,10 @@ class InterceptionKeyboard:
 
         requested_hkl = int(user32.LoadKeyboardLayoutW(layout_id, self.KLF_ACTIVATE))
         if not requested_hkl:
-            raise DriverNotReadyError(
-                f"Windows keyboard layout {layout_id} is not installed"
-            )
+            raise DriverNotReadyError(f"Windows keyboard layout {layout_id} is not installed")
 
         self.assert_focus()
-        user32.PostMessageW(
-            self.target_window,
-            self.WM_INPUTLANGCHANGEREQUEST,
-            0,
-            requested_hkl,
-        )
-        # Let the target thread apply the layout before mapping and sending the key.
+        user32.PostMessageW(self.target_window, self.WM_INPUTLANGCHANGEREQUEST, 0, requested_hkl)
         for _ in range(10):
             time.sleep(0.01)
             hkl = self._get_hkl()
@@ -127,9 +119,7 @@ class InterceptionKeyboard:
             if result != -1:
                 return result & 0xFF, (result >> 8) & 0xFF, hkl
 
-        raise DriverNotReadyError(
-            f"Could not switch the target window to layout {layout_id}"
-        )
+        raise DriverNotReadyError(f"Could not switch the target window to layout {layout_id}")
 
     def _key_data(self, vk: int, hkl: int) -> tuple[int, int]:
         mapped = int(user32.MapVirtualKeyExW(vk, self.MAPVK_VK_TO_VSC_EX, hkl))
@@ -143,7 +133,13 @@ class InterceptionKeyboard:
         state = flags | (int(KeyFlag.KEY_UP) if key_up else int(KeyFlag.KEY_DOWN))
         self._context.send(self._keyboard, KeyStroke(scan, state))
 
-    def _tap_vk(self, vk: int, modifiers: int = 0, hkl: int | None = None) -> None:
+    def _tap_vk(
+        self,
+        vk: int,
+        modifiers: int = 0,
+        hkl: int | None = None,
+        hold_seconds: float | None = None,
+    ) -> None:
         self.assert_focus()
         if hkl is None:
             hkl = self._get_hkl()
@@ -161,23 +157,24 @@ class InterceptionKeyboard:
             self._send(mod_scan, mod_flags)
 
         self._send(scan, flags)
-        time.sleep(self._rng.uniform(0.018, 0.038))
+        hold = self._rng.uniform(0.018, 0.038) if hold_seconds is None else hold_seconds
+        time.sleep(min(0.25, max(0.008, hold)))
         self._send(scan, flags, key_up=True)
 
         for mod_scan, mod_flags in reversed(modifier_data):
             self._send(mod_scan, mod_flags, key_up=True)
 
-    def write(self, char: str) -> None:
+    def write(self, char: str, hold_seconds: float | None = None) -> None:
         if len(char) != 1:
             raise ValueError("write() accepts exactly one character")
         vk, modifiers, hkl = self._resolve_char(char)
-        self._tap_vk(vk, modifiers, hkl)
+        self._tap_vk(vk, modifiers, hkl, hold_seconds)
 
-    def enter(self) -> None:
-        self._tap_vk(self.VK_RETURN)
+    def enter(self, hold_seconds: float | None = None) -> None:
+        self._tap_vk(self.VK_RETURN, hold_seconds=hold_seconds)
 
-    def backspace(self) -> None:
-        self._tap_vk(self.VK_BACK)
+    def backspace(self, hold_seconds: float | None = None) -> None:
+        self._tap_vk(self.VK_BACK, hold_seconds=hold_seconds)
 
     def close(self) -> None:
         self._context.destroy()
