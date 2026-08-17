@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Qt, Slot
+from PySide6.QtCore import QThread, QTimer, Qt, Slot
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSlider
 
 from typerx.domain.models import TypingProfile
 from typerx.domain.splitter import SplitPlan
 from typerx.persistence.store import AppStore
+from typerx.platform.capture_privacy import exclude_process_windows_from_capture
 from typerx.platform.windows import WindowsInput
 from typerx.services.typing_service import TypingService
 from typerx.ui.main_window import MainWindow as MainWindowView
@@ -18,6 +20,19 @@ class MainWindow(MainWindowView):
     def __init__(self, store: AppStore) -> None:
         self.worker: TypingWorker | None = None
         super().__init__(store)
+
+        # winId() creates the native HWND. Keep reapplying protection because Qt creates
+        # separate top-level native windows for dialogs, menus and restored windows.
+        self.winId()
+        exclude_process_windows_from_capture()
+        self._capture_privacy_timer = QTimer(self)
+        self._capture_privacy_timer.setInterval(250)
+        self._capture_privacy_timer.timeout.connect(exclude_process_windows_from_capture)
+        self._capture_privacy_timer.start()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, exclude_process_windows_from_capture)
 
     def _settings_panel(self):
         panel = super()._settings_panel()
