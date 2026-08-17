@@ -32,7 +32,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["E501", "E701", "E702"]
+ignore = ["E501", "E701", "E702", "RUF001"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/typerx/ui/main_window.py" = ["F401"]

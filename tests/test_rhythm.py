@@ -1,4 +1,5 @@
 import random
+from itertools import pairwise
 
 from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
@@ -32,9 +33,7 @@ def test_tempo_has_short_range_autocorrelation() -> None:
     rhythm = RhythmEngine(TypingProfile(variation=35), random.Random(11))
     values = [sum(rhythm.keystroke_timing("а")) for _ in range(500)]
     mean = sum(values) / len(values)
-    numerator = sum(
-        (a - mean) * (b - mean) for a, b in zip(values, values[1:], strict=False)
-    )
+    numerator = sum((a - mean) * (b - mean) for a, b in pairwise(values))
     denominator = sum((value - mean) ** 2 for value in values)
     assert numerator / denominator > 0.15
 
