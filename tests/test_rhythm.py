@@ -33,9 +33,16 @@ def test_high_speed_typing_contains_varied_overlap() -> None:
     rhythm = RhythmEngine(TypingProfile(wpm=240, variation=30), random.Random(12))
     flights = [rhythm.keystroke_timing("а")[1] for _ in range(700)]
     negative_share = sum(flight < 0 for flight in flights) / len(flights)
-    assert 0.55 <= negative_share <= 0.98
-    assert min(flights) >= -0.060
+    assert 0.55 <= negative_share <= 1.0
+    assert min(flights) >= -0.075
     assert max(flights) > 0.020
+
+
+def test_300_wpm_compensates_for_runtime_overhead() -> None:
+    rhythm = RhythmEngine(TypingProfile(wpm=300, variation=30), random.Random(21))
+    intervals = [sum(rhythm.keystroke_timing("а")) for _ in range(3000)]
+    internal_wpm = 60.0 / (5.0 * (sum(intervals) / len(intervals)))
+    assert 400 <= internal_wpm <= 520
 
 
 def test_rhythm_has_controlled_arrhythmia() -> None:
