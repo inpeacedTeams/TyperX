@@ -14,7 +14,7 @@ from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.domain.typing_physics import finger_for_key
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
 from typerx.services.monkeytype_pacing import (
-    DeadlinePacer,
+    AdaptiveDeadlinePacer,
     event_interval_seconds,
     fit_typos_to_raw_limit,
 )
@@ -130,27 +130,32 @@ class MonkeytypeService(TypingService):
         pending: list[tuple[float, PressedKey, str]] = []
         try:
             text = inbox.wait(self._cancel)
+            normalized = profile.normalized()
             progress(0, len(text))
             rng = random.Random()
-            rhythm = RhythmEngine(profile.normalized(), rng)
+            rhythm = RhythmEngine(normalized, rng)
             planned_typos = (
                 TypoPlanner(
-                    profile.typo_rate,
+                    normalized.typo_rate,
                     rng,
                     correct_typos=True,
                     corrections_only=True,
                 ).plan(text)
-                if profile.fix_typos
+                if normalized.fix_typos
                 else {}
             )
             typos = fit_typos_to_raw_limit(
                 text,
-                profile.wpm,
+                normalized.wpm,
                 planned_typos,
-                profile.correct_typos,
+                normalized.correct_typos,
             )
-            interval = event_interval_seconds(text, profile.wpm, typos, profile.correct_typos)
-            pacer = DeadlinePacer(time.perf_counter(), interval)
+            interval = event_interval_seconds(
+                text, normalized.wpm, typos, normalized.correct_typos
+            )
+            pacer = AdaptiveDeadlinePacer(
+                time.perf_counter(), interval, len(text), normalized, rng
+            )
             previous: str | None = None
 
             def release_entry(entry: tuple[float, PressedKey, str]) -> None:
@@ -178,7 +183,7 @@ class MonkeytypeService(TypingService):
                     self._wait(max(0.0, entry[0] - time.perf_counter()))
                     release_entry(entry)
 
-            def type_char(char: str, prior: str | None) -> None:
+            def type_char(char: str, prior: str | None, position: int) -> None:
                 release_due()
                 finger = finger_for_key(char)
                 conflict = next(
@@ -190,26 +195,27 @@ class MonkeytypeService(TypingService):
                 if len(pending) >= self.MAX_HELD_KEYS:
                     wait_until(min(entry[0] for entry in pending))
                 natural_dwell, _ = rhythm.keystroke_timing(char, prior)
+                next_deadline = pacer.next_deadline(char, prior, position)
                 dwell = min(natural_dwell, max(0.012, interval * 0.82))
                 key = output.press(char)
                 pending.append((time.perf_counter() + dwell, key, finger))
-                wait_until(pacer.next_deadline())
+                wait_until(next_deadline)
 
-            def backspace() -> None:
+            def backspace(position: int) -> None:
                 flush_pending()
                 key = output.press_backspace()
                 hold = min(0.032, max(0.012, interval * 0.65))
                 self._wait(hold)
                 output.release(key)
-                wait_until(pacer.next_deadline())
+                wait_until(pacer.next_deadline("\\b", previous, position))
 
             for index, char in enumerate(text):
                 self._check()
                 typo = typos.get(index)
                 if typo is not None and typo.kind is TypoKind.CORRECTED:
-                    type_char(typo.replacement, previous)
-                    if profile.correct_typos:
-                        backspace()
+                    type_char(typo.replacement, previous, index)
+                    if normalized.correct_typos:
+                        backspace(index)
                     else:
                         previous = typo.replacement
                         boundary = char.isspace() or index == len(text) - 1
@@ -218,7 +224,7 @@ class MonkeytypeService(TypingService):
                         self._pause_on_word_boundary(boundary)
                         progress(index + 1, len(text))
                         continue
-                type_char(char, previous)
+                type_char(char, previous, index)
                 previous = char
                 boundary = char.isspace() or index == len(text) - 1
                 if boundary:
