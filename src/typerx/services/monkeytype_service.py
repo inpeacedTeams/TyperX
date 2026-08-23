@@ -11,6 +11,7 @@ from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
 from typerx.domain.typing_physics import finger_for_key
+from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
 from typerx.services.typing_service import TypingCancelled, TypingService
 
@@ -106,9 +107,6 @@ class MonkeytypeBridge:
 class MonkeytypeService(TypingService):
     MAX_HELD_KEYS = 3
 
-    def __init__(self) -> None:
-        super().__init__()
-
     def run(
         self,
         plan: SplitPlan,
@@ -128,7 +126,15 @@ class MonkeytypeService(TypingService):
         try:
             text = inbox.wait(self._cancel)
             progress(1, 1)
-            rhythm = RhythmEngine(profile.normalized(), random.Random())
+            rng = random.Random()
+            normalized = profile.normalized()
+            rhythm = RhythmEngine(normalized, rng)
+            typo_planner = TypoPlanner(
+                normalized.typo_rate if normalized.fix_typos else 0.0,
+                rng,
+                correct_typos=normalized.correct_typos,
+            )
+            typos = typo_planner.plan(text)
             previous: str | None = None
 
             def release_entry(entry: tuple[float, PressedKey, str]) -> None:
@@ -150,13 +156,12 @@ class MonkeytypeService(TypingService):
                     self._wait(max(0.0, entry[0] - time.perf_counter()))
                     release_entry(entry)
 
-            for index, char in enumerate(text):
-                self._check()
+            def make_physical_room(value: str) -> None:
                 now = time.perf_counter()
                 for entry in sorted(pending, key=lambda item: item[0]):
                     if entry[0] <= now:
                         release_entry(entry)
-                finger = finger_for_key(char)
+                finger = finger_for_key(value)
                 conflict = next(
                     (entry for entry in sorted(pending, key=lambda item: item[0]) if entry[2] == finger),
                     None,
@@ -166,12 +171,49 @@ class MonkeytypeService(TypingService):
                 if len(pending) >= self.MAX_HELD_KEYS:
                     wait_until(min(entry[0] for entry in pending))
 
-                dwell, flight = rhythm.keystroke_timing(char, previous)
+            def emit(value: str, press: Callable[[], PressedKey]) -> None:
+                nonlocal previous
+                self._check()
+                make_physical_room(value)
+                dwell, flight = rhythm.keystroke_timing(value, previous)
                 down_at = time.perf_counter()
-                key = output.press(char)
-                pending.append((down_at + dwell, key, finger))
+                key = press()
+                pending.append((down_at + dwell, key, finger_for_key(value)))
                 wait_until(down_at + max(0.018, dwell + flight))
-                previous = char
+                previous = value
+
+            def emit_char(value: str) -> None:
+                emit(value, lambda: output.press(value))
+
+            def emit_backspace() -> None:
+                emit("\b", output.press_backspace)
+
+            def corrected_typo(wrong: str, original: str) -> None:
+                emit_char(wrong)
+                flush_pending()
+                before, after = rhythm.correction_pause()
+                self._wait(before)
+                emit_backspace()
+                flush_pending()
+                self._wait(after)
+                emit_char(original)
+
+            for index, char in enumerate(text):
+                self._check()
+                typo = typos.get(index)
+                if typo is None:
+                    emit_char(char)
+                elif typo.kind is TypoKind.OMIT:
+                    if normalized.correct_typos:
+                        nearby = text[index + 1] if index + 1 < len(text) and not text[index + 1].isspace() else char
+                        corrected_typo(nearby, char)
+                    else:
+                        continue
+                elif typo.kind is TypoKind.CORRECTED or normalized.correct_typos:
+                    corrected_typo(typo.replacement, char)
+                else:
+                    emit_char(typo.replacement)
+
                 boundary = char.isspace() or index == len(text) - 1
                 if boundary:
                     flush_pending()
