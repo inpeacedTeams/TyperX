@@ -12,6 +12,7 @@ from pywinauto import Desktop
 from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
+from typerx.domain.typing_physics import finger_for_key
 from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
 
@@ -81,6 +82,8 @@ class ChallengeWatcher:
 
 
 class TypingService:
+    MAX_HELD_KEYS = 3
+
     def __init__(self, sleep: Callable[[float], None] = time.sleep) -> None:
         self._sleep = sleep
         self._cancel = threading.Event()
@@ -122,7 +125,7 @@ class TypingService:
         self._pause_requested.clear()
         self._paused.clear()
         output = InterceptionKeyboard(target_window)
-        pending: list[tuple[float, PressedKey]] = []
+        pending: list[tuple[float, PressedKey, str]] = []
         watcher = ChallengeWatcher(target_window) if profile.auto_123_challenge else None
         try:
             if watcher is not None:
@@ -138,30 +141,48 @@ class TypingService:
             total = len(plan.messages)
             previous: str | None = None
 
+            def release_entry(entry: tuple[float, PressedKey, str]) -> None:
+                output.release(entry[1])
+                pending.remove(entry)
+
             def wait_until(deadline: float) -> None:
                 while pending:
-                    release_at, key = min(pending, key=lambda item: item[0])
-                    if release_at > deadline:
+                    entry = min(pending, key=lambda item: item[0])
+                    if entry[0] > deadline:
                         break
-                    self._wait(max(0.0, release_at - time.perf_counter()))
-                    output.release(key)
-                    pending.remove((release_at, key))
+                    self._wait(max(0.0, entry[0] - time.perf_counter()))
+                    release_entry(entry)
                 self._wait(max(0.0, deadline - time.perf_counter()))
 
             def flush_pending() -> None:
                 while pending:
-                    release_at, key = min(pending, key=lambda item: item[0])
-                    self._wait(max(0.0, release_at - time.perf_counter()))
-                    output.release(key)
-                    pending.remove((release_at, key))
+                    entry = min(pending, key=lambda item: item[0])
+                    self._wait(max(0.0, entry[0] - time.perf_counter()))
+                    release_entry(entry)
+
+            def make_physical_room(value: str) -> None:
+                now = time.perf_counter()
+                for entry in sorted(pending, key=lambda item: item[0]):
+                    if entry[0] <= now:
+                        release_entry(entry)
+                finger = finger_for_key(value)
+                conflict = next(
+                    (entry for entry in sorted(pending, key=lambda item: item[0]) if entry[2] == finger),
+                    None,
+                )
+                if conflict is not None:
+                    wait_until(conflict[0])
+                if len(pending) >= self.MAX_HELD_KEYS:
+                    wait_until(min(entry[0] for entry in pending))
 
             def emit(value: str, press: Callable[[], PressedKey]) -> None:
                 nonlocal previous
                 self._check()
+                make_physical_room(value)
                 dwell, flight = rhythm.keystroke_timing(value, previous)
                 down_at = time.perf_counter()
                 key = press()
-                pending.append((down_at + dwell, key))
+                pending.append((down_at + dwell, key, finger_for_key(value)))
                 wait_until(down_at + max(0.018, dwell + flight))
                 previous = value
 
@@ -226,7 +247,7 @@ class TypingService:
         finally:
             if watcher is not None:
                 watcher.close()
-            for _, key in pending:
+            for _, key, _ in pending:
                 try:
                     output.release(key)
                 except Exception:
