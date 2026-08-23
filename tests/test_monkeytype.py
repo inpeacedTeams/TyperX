@@ -1,6 +1,9 @@
 import threading
 
+import pytest
+
 from typerx.services.monkeytype_service import MonkeytypeInbox
+from typerx.services.typing_service import TypingCancelled
 
 
 def test_inbox_normalizes_browser_text() -> None:
@@ -14,9 +17,5 @@ def test_inbox_ignores_empty_payload() -> None:
     inbox.put("   ")
     cancel = threading.Event()
     cancel.set()
-    try:
+    with pytest.raises(TypingCancelled):
         inbox.wait(cancel)
-    except Exception as exc:
-        assert exc.__class__.__name__ == "TypingCancelled"
-    else:
-        raise AssertionError("empty payload must not wake the inbox")
