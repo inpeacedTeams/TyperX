@@ -22,7 +22,7 @@ from typerx.services.monkeytype_service import MonkeytypeService
 from typerx.services.typing_service import TypingService
 from typerx.ui.main_window import MainWindow as MainWindowView
 from typerx.ui.main_window import TypingWorker
-from typerx.ui.monkeytype_page import MonkeytypePage
+from typerx.ui.monkeytype_options_page import MonkeytypeOptionsPage
 
 
 class MainWindow(MainWindowView):
@@ -78,7 +78,7 @@ class MainWindow(MainWindowView):
 
         self.pages = QStackedWidget()
         self.pages.addWidget(messages_page)
-        self.monkeytype_page = MonkeytypePage(self.state.profile)
+        self.monkeytype_page = MonkeytypeOptionsPage(self.state.profile)
         self.monkeytype_page.start_requested.connect(self._start_monkeytype)
         self.monkeytype_page.stop_requested.connect(self.stop_typing)
         self.monkeytype_page.settings_changed.connect(self._schedule_save)

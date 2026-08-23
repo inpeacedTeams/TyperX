@@ -185,9 +185,18 @@ class MonkeytypeService(TypingService):
                 if typo is not None and typo.kind is TypoKind.CORRECTED:
                     type_char(typo.replacement, previous)
                     flush_pending()
-                    self._wait(rng.uniform(0.08, 0.24))
-                    output.backspace(rng.uniform(0.045, 0.085))
-                    self._wait(rng.uniform(0.04, 0.12))
+                    if profile.correct_typos:
+                        self._wait(rng.uniform(0.08, 0.24))
+                        output.backspace(rng.uniform(0.045, 0.085))
+                        self._wait(rng.uniform(0.04, 0.12))
+                    else:
+                        previous = typo.replacement
+                        boundary = char.isspace() or index == len(text) - 1
+                        if boundary:
+                            flush_pending()
+                        self._pause_on_word_boundary(boundary)
+                        progress(index + 1, len(text))
+                        continue
                 type_char(char, previous)
                 previous = char
                 boundary = char.isspace() or index == len(text) - 1
