@@ -120,7 +120,9 @@ class MainWindow(MainWindowView):
         profile = super()._profile()
         if hasattr(self, "pages") and self.pages.currentIndex() == 1:
             return self.monkeytype_page.apply_to_profile(profile)
-        return profile
+        if hasattr(self, "monkeytype_page"):
+            profile.correct_typos = self.monkeytype_page.correct_typos.isChecked()
+        return profile.normalized()
 
     @Slot()
     def _hotkey_start(self) -> None:
