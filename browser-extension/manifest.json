@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "TyperX Monkeytype Companion",
+  "version": "1.0.0",
+  "description": "Sends the current Monkeytype practice/custom words to the local TyperX app.",
+  "content_scripts": [
+    {
+      "matches": ["https://monkeytype.com/*", "https://www.monkeytype.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["http://127.0.0.1:8765/*"]
+}
