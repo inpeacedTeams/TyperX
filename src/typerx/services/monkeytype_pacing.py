@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from dataclasses import dataclass
 
 from typerx.domain.models import TypingProfile
@@ -93,12 +94,7 @@ def event_interval_seconds(
 
 @dataclass(slots=True)
 class AdaptiveDeadlinePacer:
-    """Monkeytype-only pacer with correlated, text-aware event intervals.
-
-    The mean remains calibrated to the requested WPM. Individual events vary
-    using a bounded random walk, word-length anticipation, punctuation pauses,
-    and a gentle fatigue curve. It never changes the Telegram/general typer.
-    """
+    """Monkeytype-only pacer with safe cumulative, text-aware intervals."""
 
     started_at: float
     base_interval: float
@@ -108,6 +104,7 @@ class AdaptiveDeadlinePacer:
     events: int = 0
     _tempo: float = 0.0
     _last_word_length: int = 0
+    _deadline: float | None = None
 
     def next_deadline(
         self,
@@ -141,7 +138,11 @@ class AdaptiveDeadlinePacer:
             self._last_word_length += 1
 
         interval = max(0.010, min(0.95, interval * fatigue))
-        return self.started_at + self.events * interval
+        previous_deadline = self.started_at if self._deadline is None else self._deadline
+        # Never calculate from started_at * events. That resets the interval on
+        # every character and causes bursts, skipped-looking chunks, and lag.
+        self._deadline = max(previous_deadline, time.perf_counter()) + interval
+        return self._deadline
 
 
 @dataclass(slots=True)
