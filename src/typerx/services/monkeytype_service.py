@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 from collections.abc import Callable
@@ -70,7 +71,7 @@ class MonkeytypeBridge:
                     size = min(int(self.headers.get("Content-Length", "0")), 100_000)
                     payload = json.loads(self.rfile.read(size))
                     text = str(payload.get("text", ""))
-                except (ValueError, TypeError, json.JSONDecodeError):
+                except (ValueError, TypeError):
                     self.send_error(400)
                     return
                 inbox.put(text)
@@ -151,7 +152,7 @@ class MonkeytypeService:
         try:
             text = inbox.wait(self._cancel)
             progress(1, 1)
-            rhythm = RhythmEngine(profile.normalized(), __import__("random").Random())
+            rhythm = RhythmEngine(profile.normalized(), random.Random())
             previous: str | None = None
 
             def release_entry(entry: tuple[float, PressedKey, str]) -> None:
