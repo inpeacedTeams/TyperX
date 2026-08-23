@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, QTimer, Qt, Slot
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider
 
@@ -8,6 +8,7 @@ from typerx.domain.models import TypingProfile
 from typerx.domain.splitter import SplitPlan
 from typerx.persistence.store import AppStore
 from typerx.platform.capture_privacy import exclude_process_windows_from_capture
+from typerx.platform.pause_hotkey import PauseHotkey
 from typerx.platform.windows import WindowsInput
 from typerx.services.typing_service import TypingService
 from typerx.ui.main_window import MainWindow as MainWindowView
@@ -15,9 +16,15 @@ from typerx.ui.main_window import TypingWorker
 
 
 class MainWindow(MainWindowView):
+    pause_requested = Signal()
+
     def __init__(self, store: AppStore) -> None:
         self.worker: TypingWorker | None = None
         super().__init__(store)
+        self.pause_requested.connect(self._toggle_pause)
+        self.pause_hotkey = PauseHotkey(self.pause_requested.emit)
+        self.pause_hotkey.start()
+        self.status.setText("Готов · F8 старт · F9 стоп · F10 пауза")
         self.winId()
         exclude_process_windows_from_capture()
         self._capture_privacy_timer = QTimer(self)
@@ -112,6 +119,23 @@ class MainWindow(MainWindowView):
         self.worker_thread.start()
 
     @Slot()
+    def _toggle_pause(self) -> None:
+        if self.service is None:
+            self.status.setText("Сначала запусти ввод · F8")
+            return
+        state = self.service.toggle_pause()
+        if state == "resumed":
+            self.status.setText("Продолжаю со следующего слова · F10 пауза")
+        elif state == "paused":
+            self.status.setText("Пауза между словами · F10 продолжить")
+        else:
+            self.status.setText("Останавливаюсь после текущего слова…")
+
+    @Slot()
     def _thread_cleared(self) -> None:
         self.worker = None
         super()._thread_cleared()
+
+    def closeEvent(self, event) -> None:
+        self.pause_hotkey.close()
+        super().closeEvent(event)
