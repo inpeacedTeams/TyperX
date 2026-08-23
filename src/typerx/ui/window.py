@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider
 
-from typerx.domain.models import TypingProfile
 from typerx.persistence.store import AppStore
 from typerx.platform.capture_privacy import exclude_process_windows_from_capture
 from typerx.platform.pause_hotkey import PauseHotkey
@@ -24,7 +22,6 @@ class MainWindow(MainWindowView):
         self.pause_requested.connect(self._toggle_pause)
         self.pause_hotkey = PauseHotkey(self.pause_requested.emit)
         self.pause_hotkey.start()
-        self.status.setText("Готов · F8 старт · F9 стоп · F10 пауза")
         self.winId()
         exclude_process_windows_from_capture()
         self._capture_privacy_timer = QTimer(self)
@@ -35,57 +32,6 @@ class MainWindow(MainWindowView):
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         QTimer.singleShot(0, exclude_process_windows_from_capture)
-
-    def _settings_panel(self):
-        panel = super()._settings_panel()
-        layout = panel.layout()
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Слов в сообщении"))
-        row.addStretch()
-        self.words_value = QLabel()
-        self.words_value.setStyleSheet("color:#6d43c5;font-weight:700")
-        row.addWidget(self.words_value)
-        self.words = QSlider(Qt.Orientation.Horizontal)
-        self.words.setRange(1, 16)
-        self.words.setToolTip("TyperX будет стремиться к этой длине, иногда отклоняясь на одно слово")
-        self.words.valueChanged.connect(self._settings_changed)
-        layout.insertLayout(7, row)
-        layout.insertWidget(8, self.words)
-
-        self.correct_typos = QCheckBox("Исправлять опечатки через Backspace")
-        self.correct_typos.setToolTip("Выключи, чтобы TyperX оставлял опечатки без Backspace-исправлений")
-        self.correct_typos.toggled.connect(self._settings_changed)
-        layout.insertWidget(13, self.correct_typos)
-
-        self.auto_123 = QCheckBox("Автоответ на запрос 123")
-        self.auto_123.toggled.connect(self._settings_changed)
-        layout.insertWidget(14, self.auto_123)
-
-        self.monkeytype_mode = QCheckBox("Monkeytype автотайп")
-        self.monkeytype_mode.setToolTip(
-            "Для practice/custom тестов. Установи companion extension, открой тест и нажми F8"
-        )
-        layout.insertWidget(15, self.monkeytype_mode)
-        return panel
-
-    def _load_profile(self, profile: TypingProfile) -> None:
-        super()._load_profile(profile)
-        self.words.setValue(profile.words_per_message)
-        self.correct_typos.setChecked(profile.correct_typos)
-        self.auto_123.setChecked(profile.auto_123_challenge)
-        self._refresh_labels()
-
-    def _profile(self) -> TypingProfile:
-        profile = super()._profile()
-        profile.words_per_message = self.words.value()
-        profile.correct_typos = self.correct_typos.isChecked()
-        profile.auto_123_challenge = self.auto_123.isChecked()
-        return profile.normalized()
-
-    def _refresh_labels(self) -> None:
-        super()._refresh_labels()
-        if hasattr(self, "words_value"):
-            self.words_value.setText(f"≈ {self.words.value()}")
 
     @Slot()
     def _hotkey_start(self) -> None:
@@ -101,14 +47,16 @@ class MainWindow(MainWindowView):
         if self.monkeytype_mode.isChecked():
             plan = self.splitter.plan("monkeytype", profile, seed=1)
             self.service = MonkeytypeService()
-            status = "Жду слова от Monkeytype extension…"
+            status = "Жду тест от Monkeytype extension…"
+            self.context.setText("Monkeytype · локальный мост")
         else:
             plan = self.splitter.plan(self.editor.toPlainText(), profile, seed=None)
             if not plan.messages:
-                self._error("В шаблоне нет текста для отправки")
+                self._error("В тексте нечего печатать")
                 return
             self.service = TypingService()
             status = "Запускаю ввод…"
+            self.context.setText(f"{len(plan.messages)} сообщений")
 
         self.worker_thread = QThread(self)
         self.worker = TypingWorker(self.service, plan, profile, target)
@@ -135,13 +83,14 @@ class MainWindow(MainWindowView):
             return
         state = self.service.toggle_pause()
         if state == "resumed":
-            self.status.setText("Продолжаю со следующего слова · F10 пауза")
+            self.status.setText("Продолжаю со следующего слова")
         else:
-            self.status.setText("Останавливаюсь после текущего слова…")
+            self.status.setText("Пауза после текущего слова…")
 
     @Slot()
     def _thread_cleared(self) -> None:
         self.worker = None
+        self.context.setText("Активное окно не выбрано")
         super()._thread_cleared()
 
     def closeEvent(self, event) -> None:
