@@ -13,6 +13,7 @@ from typerx.domain.splitter import SplitPlan
 from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.domain.typing_physics import finger_for_key
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
+from typerx.services.monkeytype_pacing import DeadlinePacer, event_interval_seconds
 from typerx.services.typing_service import TypingCancelled, TypingService
 
 
@@ -105,7 +106,7 @@ class MonkeytypeBridge:
 
 
 class MonkeytypeService(TypingService):
-    MAX_HELD_KEYS = 3
+    MAX_HELD_KEYS = 4
 
     def run(
         self,
@@ -138,11 +139,19 @@ class MonkeytypeService(TypingService):
                 if profile.fix_typos
                 else {}
             )
+            interval = event_interval_seconds(text, profile.wpm, typos, profile.correct_typos)
+            pacer = DeadlinePacer(time.perf_counter(), interval)
             previous: str | None = None
 
             def release_entry(entry: tuple[float, PressedKey, str]) -> None:
                 output.release(entry[1])
                 pending.remove(entry)
+
+            def release_due() -> None:
+                now = time.perf_counter()
+                for entry in sorted(pending, key=lambda item: item[0]):
+                    if entry[0] <= now:
+                        release_entry(entry)
 
             def wait_until(deadline: float) -> None:
                 while pending:
@@ -160,10 +169,7 @@ class MonkeytypeService(TypingService):
                     release_entry(entry)
 
             def type_char(char: str, prior: str | None) -> None:
-                now = time.perf_counter()
-                for entry in sorted(pending, key=lambda item: item[0]):
-                    if entry[0] <= now:
-                        release_entry(entry)
+                release_due()
                 finger = finger_for_key(char)
                 conflict = next(
                     (entry for entry in sorted(pending, key=lambda item: item[0]) if entry[2] == finger),
@@ -173,22 +179,28 @@ class MonkeytypeService(TypingService):
                     wait_until(conflict[0])
                 if len(pending) >= self.MAX_HELD_KEYS:
                     wait_until(min(entry[0] for entry in pending))
-                dwell, flight = rhythm.keystroke_timing(char, prior)
-                down_at = time.perf_counter()
+
+                natural_dwell, _ = rhythm.keystroke_timing(char, prior)
+                dwell = min(natural_dwell, max(0.012, interval * 0.82))
                 key = output.press(char)
-                pending.append((down_at + dwell, key, finger))
-                wait_until(down_at + max(0.018, dwell + flight))
+                pending.append((time.perf_counter() + dwell, key, finger))
+                wait_until(pacer.next_deadline())
+
+            def backspace() -> None:
+                flush_pending()
+                key = output.press_backspace()
+                hold = min(0.032, max(0.012, interval * 0.65))
+                self._wait(hold)
+                output.release(key)
+                wait_until(pacer.next_deadline())
 
             for index, char in enumerate(text):
                 self._check()
                 typo = typos.get(index)
                 if typo is not None and typo.kind is TypoKind.CORRECTED:
                     type_char(typo.replacement, previous)
-                    flush_pending()
                     if profile.correct_typos:
-                        self._wait(rng.uniform(0.08, 0.24))
-                        output.backspace(rng.uniform(0.045, 0.085))
-                        self._wait(rng.uniform(0.04, 0.12))
+                        backspace()
                     else:
                         previous = typo.replacement
                         boundary = char.isspace() or index == len(text) - 1
