@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typerx.domain.models import TypingProfile
 from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
+from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.domain.typing_physics import finger_for_key
-from typerx.domain.typos import TypoPlanner
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
 from typerx.services.typing_service import TypingCancelled, TypingService
 
@@ -81,10 +81,7 @@ class MonkeytypeBridge:
                 self.end_headers()
 
             def _cors(self) -> None:
-                self.send_header(
-                    "Access-Control-Allow-Origin",
-                    self.headers.get("Origin", ""),
-                )
+                self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", ""))
                 self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
@@ -128,17 +125,19 @@ class MonkeytypeService(TypingService):
         pending: list[tuple[float, PressedKey, str]] = []
         try:
             text = inbox.wait(self._cancel)
-            progress(1, 1)
+            progress(0, len(text))
             rng = random.Random()
-            normalized = profile.normalized()
-            rhythm = RhythmEngine(normalized, rng)
-            typo_planner = TypoPlanner(
-                normalized.typo_rate if normalized.fix_typos else 0.0,
-                rng,
-                correct_typos=True,
-                correction_only=True,
+            rhythm = RhythmEngine(profile.normalized(), rng)
+            typos = (
+                TypoPlanner(
+                    profile.typo_rate,
+                    rng,
+                    correct_typos=True,
+                    corrections_only=True,
+                ).plan(text)
+                if profile.fix_typos
+                else {}
             )
-            typos = typo_planner.plan(text)
             previous: str | None = None
 
             def release_entry(entry: tuple[float, PressedKey, str]) -> None:
@@ -160,58 +159,42 @@ class MonkeytypeService(TypingService):
                     self._wait(max(0.0, entry[0] - time.perf_counter()))
                     release_entry(entry)
 
-            def make_physical_room(value: str) -> None:
+            def type_char(char: str, prior: str | None) -> None:
                 now = time.perf_counter()
                 for entry in sorted(pending, key=lambda item: item[0]):
                     if entry[0] <= now:
                         release_entry(entry)
-                finger = finger_for_key(value)
+                finger = finger_for_key(char)
                 conflict = next(
-                    (
-                        entry
-                        for entry in sorted(pending, key=lambda item: item[0])
-                        if entry[2] == finger
-                    ),
+                    (entry for entry in sorted(pending, key=lambda item: item[0]) if entry[2] == finger),
                     None,
                 )
                 if conflict is not None:
                     wait_until(conflict[0])
                 if len(pending) >= self.MAX_HELD_KEYS:
                     wait_until(min(entry[0] for entry in pending))
-
-            def emit(value: str, press: Callable[[], PressedKey]) -> None:
-                nonlocal previous
-                self._check()
-                make_physical_room(value)
-                dwell, flight = rhythm.keystroke_timing(value, previous)
+                dwell, flight = rhythm.keystroke_timing(char, prior)
                 down_at = time.perf_counter()
-                key = press()
-                pending.append((down_at + dwell, key, finger_for_key(value)))
+                key = output.press(char)
+                pending.append((down_at + dwell, key, finger))
                 wait_until(down_at + max(0.018, dwell + flight))
-                previous = value
-
-            def emit_char(value: str) -> None:
-                emit(value, lambda: output.press(value))
-
-            def emit_backspace() -> None:
-                emit("\b", output.press_backspace)
 
             for index, char in enumerate(text):
+                self._check()
                 typo = typos.get(index)
-                if typo is not None and typo.replacement:
-                    emit_char(typo.replacement)
+                if typo is not None and typo.kind is TypoKind.CORRECTED:
+                    type_char(typo.replacement, previous)
                     flush_pending()
-                    before, after = rhythm.correction_pause()
-                    self._wait(before)
-                    emit_backspace()
-                    flush_pending()
-                    self._wait(after)
-
-                emit_char(char)
+                    self._wait(rng.uniform(0.08, 0.24))
+                    output.backspace(rng.uniform(0.045, 0.085))
+                    self._wait(rng.uniform(0.04, 0.12))
+                type_char(char, previous)
+                previous = char
                 boundary = char.isspace() or index == len(text) - 1
                 if boundary:
                     flush_pending()
                 self._pause_on_word_boundary(boundary)
+                progress(index + 1, len(text))
             flush_pending()
         finally:
             for _, key, _ in pending:
