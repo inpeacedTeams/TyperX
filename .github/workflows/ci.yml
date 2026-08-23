@@ -18,8 +18,11 @@ jobs:
       - run: python -m pytest --cov=typerx.domain --cov=typerx.persistence --cov-report=term-missing
       - run: python -m compileall -q src
       - run: pyinstaller --clean --noconfirm typerx.spec
+      # CI validates the build; artifact storage is optional because quota is external.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: TyperX-windows-x64
           path: dist/TyperX.exe
           if-no-files-found: error
+          retention-days: 1
