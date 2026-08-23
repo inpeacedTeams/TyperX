@@ -5,7 +5,6 @@ from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider
 
 from typerx.domain.models import TypingProfile
-from typerx.domain.splitter import SplitPlan
 from typerx.persistence.store import AppStore
 from typerx.platform.capture_privacy import exclude_process_windows_from_capture
 from typerx.platform.pause_hotkey import PauseHotkey
