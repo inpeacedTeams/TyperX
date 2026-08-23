@@ -1,16 +1,8 @@
 PALETTE = {
-    "canvas": "#f4f3f8",
-    "surface": "#faf9fd",
-    "surface_alt": "#efedf5",
-    "surface_strong": "#e7e3ef",
-    "ink": "#272331",
-    "muted": "#716b7c",
-    "line": "#ddd8e6",
-    "accent": "#7650c9",
-    "accent_hover": "#6842b8",
-    "accent_soft": "#ede7fa",
-    "danger": "#b5415a",
-    "success": "#26745a",
+    "canvas": "#f4f3f8", "surface": "#faf9fd", "surface_alt": "#efedf5",
+    "surface_strong": "#e7e3ef", "ink": "#272331", "muted": "#716b7c",
+    "line": "#ddd8e6", "accent": "#7650c9", "accent_hover": "#6842b8",
+    "accent_soft": "#ede7fa", "danger": "#b5415a", "success": "#26745a",
 }
 
 
@@ -25,7 +17,7 @@ def stylesheet() -> str:
     QFrame#inspector {{ background: transparent; border: none; }}
     QFrame#sideNav {{ background: #ebe8f1; border-right: 1px solid {p['line']}; }}
     QLabel#navBrand {{ font-size: 23px; font-weight: 800; }}
-    QLabel#navFoot {{ color: {p['muted']}; font-size: 11px; line-height: 1.4; }}
+    QLabel#navFoot {{ color: {p['muted']}; font-size: 11px; }}
     QPushButton#navButton {{ background: transparent; border: none; text-align: left; padding: 0 14px; font-weight: 650; }}
     QPushButton#navButton:hover {{ background: {p['surface_strong']}; }}
     QPushButton#navButton:checked {{ background: {p['surface']}; color: {p['accent']}; border: 1px solid {p['line']}; }}
@@ -47,8 +39,10 @@ def stylesheet() -> str:
     QFrame#miniStat {{ background: {p['surface_alt']}; border: 1px solid {p['line']}; border-radius: 11px; }}
     QProgressBar {{ min-height: 8px; max-height: 8px; background: {p['surface_alt']}; border: none; border-radius: 4px; }}
     QProgressBar::chunk {{ background: {p['accent']}; border-radius: 4px; }}
-    QLineEdit, QTextEdit {{ background: {p['surface_alt']}; border: 1px solid {p['line']}; border-radius: 11px; padding: 9px 11px; }}
-    QLineEdit:focus, QTextEdit:focus {{ border: 2px solid {p['accent']}; padding: 8px 10px; }}
+    QLineEdit, QTextEdit, QSpinBox#numberInput {{ background: {p['surface_alt']}; border: 1px solid {p['line']}; border-radius: 10px; padding: 8px 10px; }}
+    QSpinBox#numberInput {{ min-width: 92px; font-weight: 750; color: {p['accent']}; }}
+    QLineEdit:focus, QTextEdit:focus, QSpinBox#numberInput:focus {{ border: 2px solid {p['accent']}; padding: 7px 9px; }}
+    QSpinBox#numberInput::up-button, QSpinBox#numberInput::down-button {{ width: 0; border: none; }}
     QLineEdit#titleInput {{ background: transparent; border: none; border-radius: 0; padding: 2px 0; font-size: 20px; font-weight: 700; }}
     QLineEdit#titleInput:focus {{ border: none; padding: 2px 0; }}
     QTextEdit {{ font-size: 15px; }}
@@ -66,8 +60,7 @@ def stylesheet() -> str:
     QPushButton#primary {{ background: {p['accent']}; color: #fdfbff; border-color: {p['accent']}; min-height: 46px; }}
     QPushButton#primary:hover {{ background: {p['accent_hover']}; }}
     QPushButton#danger {{ color: {p['danger']}; }}
-    QPushButton#quiet {{ background: transparent; border-color: transparent; }}
-    QPushButton#preset {{ min-height: 34px; padding: 0 10px; }}
+    QPushButton#preset {{ min-height: 36px; padding: 0 12px; }}
     QSlider::groove:horizontal {{ height: 5px; background: {p['line']}; border-radius: 2px; }}
     QSlider::sub-page:horizontal {{ background: {p['accent']}; border-radius: 2px; }}
     QSlider::handle:horizontal {{ width: 17px; margin: -7px 0; border-radius: 8px; background: {p['surface']}; border: 2px solid {p['accent']}; }}

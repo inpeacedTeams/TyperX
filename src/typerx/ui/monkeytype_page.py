@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +32,18 @@ def format_duration(seconds: float) -> str:
     return f"≈ {minutes} мин {remainder:02} сек"
 
 
+def typo_frequency_label(rate: int) -> str:
+    if rate <= 0:
+        return "Без опечаток"
+    if rate <= 5:
+        return "Редкие"
+    if rate <= 15:
+        return "Естественные"
+    if rate <= 25:
+        return "Частые"
+    return "Очень частые"
+
+
 class MonkeytypePage(QWidget):
     start_requested = Signal()
     stop_requested = Signal()
@@ -39,6 +52,7 @@ class MonkeytypePage(QWidget):
     def __init__(self, profile: TypingProfile) -> None:
         super().__init__()
         self._total = 0
+        self._syncing = False
         self._build_ui()
         self.load_profile(profile)
         self._refresh_forecast()
@@ -47,15 +61,22 @@ class MonkeytypePage(QWidget):
         shell = QVBoxLayout(self)
         shell.setContentsMargins(28, 24, 28, 24)
         shell.setSpacing(18)
+        shell.addLayout(self._header())
+        body = QHBoxLayout()
+        body.setSpacing(16)
+        body.addWidget(self._session_panel(), 3)
+        body.addWidget(self._controls_panel(), 2)
+        shell.addLayout(body, 1)
 
+    def _header(self) -> QHBoxLayout:
         header = QHBoxLayout()
         titles = QVBoxLayout()
         titles.setSpacing(2)
         eyebrow = QLabel("MONKEYTYPE LAB")
         eyebrow.setObjectName("eyebrow")
-        title = QLabel("Автотайп без ощущения робота")
+        title = QLabel("Скорость под твоим контролем")
         title.setObjectName("pageTitle")
-        subtitle = QLabel("Открой practice или custom test. TyperX поймает текст и напечатает его живым ритмом.")
+        subtitle = QLabel("Точный WPM, живой ритм и исправляемые опечатки. Без скрытых режимов.")
         subtitle.setObjectName("muted")
         self.connection = QLabel("Готов к подключению")
         self.connection.setObjectName("status")
@@ -65,13 +86,7 @@ class MonkeytypePage(QWidget):
         header.addLayout(titles)
         header.addStretch()
         header.addWidget(self.connection, 0, Qt.AlignmentFlag.AlignTop)
-        shell.addLayout(header)
-
-        body = QHBoxLayout()
-        body.setSpacing(16)
-        body.addWidget(self._session_panel(), 3)
-        body.addWidget(self._controls_panel(), 2)
-        shell.addLayout(body, 1)
+        return header
 
     def _session_panel(self) -> QFrame:
         panel = QFrame()
@@ -79,18 +94,16 @@ class MonkeytypePage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(24, 24, 24, 22)
         layout.setSpacing(14)
-
         label = QLabel("СЕССИЯ")
         label.setObjectName("eyebrow")
         self.session_title = QLabel("Monkeytype ждёт тебя")
         self.session_title.setObjectName("monkeyTitle")
-        self.session_hint = QLabel("Нажми старт, затем за 3 секунды переключись в окно теста.")
+        self.session_hint = QLabel("Выставь скорость, включи опечатки и запускай тест.")
         self.session_hint.setObjectName("muted")
         self.session_hint.setWordWrap(True)
         layout.addWidget(label)
         layout.addWidget(self.session_title)
         layout.addWidget(self.session_hint)
-
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
@@ -99,9 +112,9 @@ class MonkeytypePage(QWidget):
 
         stats = QHBoxLayout()
         stats.setSpacing(10)
-        self.speed_stat = self._stat("105", "WPM")
-        self.typo_stat = self._stat("12%", "ОПЕЧАТКИ")
-        self.time_stat = self._stat("≈ 29 сек", "50 СЛОВ")
+        self.speed_stat = self._stat("300", "ЦЕЛЬ WPM")
+        self.typo_stat = self._stat("12%", "СЛОВ С ОШИБКОЙ")
+        self.time_stat = self._stat("≈ 12 сек", "50 СЛОВ")
         stats.addWidget(self.speed_stat)
         stats.addWidget(self.typo_stat)
         stats.addWidget(self.time_stat)
@@ -112,15 +125,15 @@ class MonkeytypePage(QWidget):
         preview_layout = QVBoxLayout(preview)
         preview_layout.setContentsMargins(14, 12, 14, 12)
         preview_layout.setSpacing(4)
-        preview_label = QLabel("КАК ЭТО БУДЕТ ВЫГЛЯДЕТЬ")
+        preview_label = QLabel("ПРИМЕР ОПЕЧАТКИ")
         preview_label.setObjectName("eyebrow")
         self.preview_text = QLabel("natural  →  natiral  →  natural")
         self.preview_text.setObjectName("previewText")
-        preview_note = QLabel("Ошибка появляется, короткая реакция, Backspace, правильная буква.")
-        preview_note.setObjectName("muted")
+        self.preview_note = QLabel("Соседняя клавиша, короткая реакция, Backspace, исправление.")
+        self.preview_note.setObjectName("muted")
         preview_layout.addWidget(preview_label)
         preview_layout.addWidget(self.preview_text)
-        preview_layout.addWidget(preview_note)
+        preview_layout.addWidget(self.preview_note)
         layout.addWidget(preview)
         layout.addStretch()
 
@@ -143,16 +156,19 @@ class MonkeytypePage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(20, 22, 20, 20)
         layout.setSpacing(12)
-        title = QLabel("Характер печати")
+        title = QLabel("Настройки Monkeytype")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
 
+        preset_label = QLabel("БЫСТРЫЙ ВЫБОР")
+        preset_label.setObjectName("eyebrow")
+        layout.addWidget(preset_label)
         presets = QHBoxLayout()
         presets.setSpacing(7)
         for name, wpm, variation, typos in (
-            ("Спокойно", 70, 18, 6),
-            ("Живо", 105, 24, 12),
-            ("Быстро", 155, 18, 8),
+            ("100", 100, 24, 8),
+            ("200", 200, 16, 10),
+            ("300 WPM", 300, 10, 12),
         ):
             button = QPushButton(name)
             button.setObjectName("preset")
@@ -162,14 +178,59 @@ class MonkeytypePage(QWidget):
             presets.addWidget(button)
         layout.addLayout(presets)
 
-        self.wpm, self.wpm_value = self._slider(layout, "Скорость", 25, 300)
+        layout.addSpacing(4)
+        layout.addWidget(self._eyebrow("СКОРОСТЬ"))
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("Целевая скорость"))
+        speed_row.addStretch()
+        self.wpm_input = QSpinBox()
+        self.wpm_input.setObjectName("numberInput")
+        self.wpm_input.setRange(25, 300)
+        self.wpm_input.setSuffix(" WPM")
+        self.wpm_input.setKeyboardTracking(False)
+        self.wpm_input.valueChanged.connect(self._wpm_input_changed)
+        speed_row.addWidget(self.wpm_input)
+        layout.addLayout(speed_row)
+        self.wpm = QSlider(Qt.Orientation.Horizontal)
+        self.wpm.setRange(25, 300)
+        self.wpm.valueChanged.connect(self._wpm_slider_changed)
+        layout.addWidget(self.wpm)
+        range_row = QHBoxLayout()
+        minimum = QLabel("25")
+        maximum = QLabel("300")
+        minimum.setObjectName("muted")
+        maximum.setObjectName("muted")
+        range_row.addWidget(minimum)
+        range_row.addStretch()
+        range_row.addWidget(maximum)
+        layout.addLayout(range_row)
+
         self.variation, self.variation_value = self._slider(layout, "Живой разброс", 0, 55)
-        self.typos, self.typos_value = self._slider(layout, "Частота опечаток", 0, 40)
-        self.typos_enabled = QCheckBox("Показывать и исправлять опечатки")
-        self.typos_enabled.toggled.connect(self._changed)
-        layout.addWidget(self.typos_enabled)
 
         layout.addSpacing(4)
+        layout.addWidget(self._eyebrow("ОПЕЧАТКИ"))
+        self.typos_enabled = QCheckBox("Делать опечатки и исправлять Backspace")
+        self.typos_enabled.toggled.connect(self._changed)
+        layout.addWidget(self.typos_enabled)
+        typo_row = QHBoxLayout()
+        self.typo_level = QLabel("Естественные")
+        self.typo_level.setObjectName("helper")
+        typo_row.addWidget(self.typo_level)
+        typo_row.addStretch()
+        self.typos_input = QSpinBox()
+        self.typos_input.setObjectName("numberInput")
+        self.typos_input.setRange(0, 40)
+        self.typos_input.setSuffix("% слов")
+        self.typos_input.setKeyboardTracking(False)
+        self.typos_input.valueChanged.connect(self._typo_input_changed)
+        typo_row.addWidget(self.typos_input)
+        layout.addLayout(typo_row)
+        self.typos = QSlider(Qt.Orientation.Horizontal)
+        self.typos.setRange(0, 40)
+        self.typos.valueChanged.connect(self._typo_slider_changed)
+        layout.addWidget(self.typos)
+        layout.addStretch()
+
         checklist = QLabel("ПЕРЕД СТАРТОМ")
         checklist.setObjectName("eyebrow")
         layout.addWidget(checklist)
@@ -181,13 +242,13 @@ class MonkeytypePage(QWidget):
             item = QLabel(text)
             item.setObjectName("checkItem")
             layout.addWidget(item)
-        layout.addStretch()
-
-        hotkeys = QLabel("F8 старт  ·  F9 стоп  ·  F10 пауза")
-        hotkeys.setObjectName("note")
-        hotkeys.setWordWrap(True)
-        layout.addWidget(hotkeys)
         return panel
+
+    @staticmethod
+    def _eyebrow(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("eyebrow")
+        return label
 
     @staticmethod
     def _stat(value: str, caption: str) -> QFrame:
@@ -219,10 +280,42 @@ class MonkeytypePage(QWidget):
         layout.addWidget(slider)
         return slider, value
 
+    def _wpm_input_changed(self, value: int) -> None:
+        if not self._syncing:
+            self._syncing = True
+            self.wpm.setValue(value)
+            self._syncing = False
+            self._changed()
+
+    def _wpm_slider_changed(self, value: int) -> None:
+        if not self._syncing:
+            self._syncing = True
+            self.wpm_input.setValue(value)
+            self._syncing = False
+            self._changed()
+
+    def _typo_input_changed(self, value: int) -> None:
+        if not self._syncing:
+            self._syncing = True
+            self.typos.setValue(value)
+            self._syncing = False
+            if value > 0:
+                self.typos_enabled.setChecked(True)
+            self._changed()
+
+    def _typo_slider_changed(self, value: int) -> None:
+        if not self._syncing:
+            self._syncing = True
+            self.typos_input.setValue(value)
+            self._syncing = False
+            if value > 0:
+                self.typos_enabled.setChecked(True)
+            self._changed()
+
     def _apply_preset(self, wpm: int, variation: int, typos: int) -> None:
-        self.wpm.setValue(wpm)
+        self.wpm_input.setValue(wpm)
         self.variation.setValue(variation)
-        self.typos.setValue(typos)
+        self.typos_input.setValue(typos)
         self.typos_enabled.setChecked(typos > 0)
         self._changed()
 
@@ -232,20 +325,29 @@ class MonkeytypePage(QWidget):
 
     def _refresh_forecast(self) -> None:
         rate = self.typos.value() if self.typos_enabled.isChecked() else 0
-        self.wpm_value.setText(f"{self.wpm.value()} WPM")
         self.variation_value.setText(f"{self.variation.value()}%")
-        self.typos_value.setText(f"{rate}% слов")
+        self.typo_level.setText(typo_frequency_label(rate))
+        self.typos_input.setEnabled(self.typos_enabled.isChecked())
+        self.typos.setEnabled(self.typos_enabled.isChecked())
         self.speed_stat.value_label.setText(str(self.wpm.value()))
         self.typo_stat.value_label.setText(f"{rate}%")
-        self.time_stat.value_label.setText(format_duration(estimate_seconds(250, self.wpm.value(), rate)))
+        self.time_stat.value_label.setText(
+            format_duration(estimate_seconds(250, self.wpm.value(), rate))
+        )
+        enabled = rate > 0
         self.preview_text.setText(
-            "natural  →  natiral  →  natural" if rate else "natural  →  natural"
+            "natural  →  natiral  →  natural" if enabled else "natural  →  natural"
+        )
+        self.preview_note.setText(
+            "Соседняя клавиша, короткая реакция, Backspace, исправление."
+            if enabled
+            else "Опечатки выключены, текст печатается без исправлений."
         )
 
     def load_profile(self, profile: TypingProfile) -> None:
-        self.wpm.setValue(profile.wpm)
+        self.wpm_input.setValue(profile.wpm)
         self.variation.setValue(profile.variation)
-        self.typos.setValue(round(profile.typo_rate))
+        self.typos_input.setValue(round(profile.typo_rate))
         self.typos_enabled.setChecked(profile.fix_typos and profile.typo_rate > 0)
 
     def apply_to_profile(self, profile: TypingProfile) -> TypingProfile:
@@ -259,14 +361,14 @@ class MonkeytypePage(QWidget):
     def preparing(self) -> None:
         self.connection.setText("Переключись в Monkeytype")
         self.session_title.setText("Старт через 3 секунды")
-        self.session_hint.setText("Фокус должен остаться в поле теста. TyperX сам дождётся текста от extension.")
+        self.session_hint.setText("Фокус должен остаться в поле теста.")
         self.start.setEnabled(False)
         self.stop.setEnabled(True)
 
     def waiting(self) -> None:
         self.connection.setText("Жду extension")
         self.session_title.setText("Слушаю Monkeytype…")
-        self.session_hint.setText("Не закрывай тест. Как только extension пришлёт слова, печать начнётся.")
+        self.session_hint.setText("Как только extension пришлёт слова, печать начнётся.")
         self.start.setEnabled(False)
         self.stop.setEnabled(True)
 
@@ -279,7 +381,8 @@ class MonkeytypePage(QWidget):
         remaining = max(0, total - current)
         rate = self.typos.value() if self.typos_enabled.isChecked() else 0
         self.session_hint.setText(
-            f"Осталось {remaining} символов · {format_duration(estimate_seconds(remaining, self.wpm.value(), rate))}"
+            f"Осталось {remaining} символов · "
+            f"{format_duration(estimate_seconds(remaining, self.wpm.value(), rate))}"
         )
 
     def finished(self, message: str) -> None:
@@ -300,6 +403,6 @@ class MonkeytypePage(QWidget):
     def idle(self) -> None:
         self.connection.setText("Готов к подключению")
         self.session_title.setText("Monkeytype ждёт тебя")
-        self.session_hint.setText("Нажми старт, затем за 3 секунды переключись в окно теста.")
+        self.session_hint.setText("Выставь скорость, включи опечатки и запускай тест.")
         self.start.setEnabled(True)
         self.stop.setEnabled(False)
