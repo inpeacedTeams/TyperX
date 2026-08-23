@@ -72,9 +72,11 @@ class MainWindow(MainWindowView):
         if enabled:
             self.start.setText("Подключить Monkeytype")
             self.status.setText("Monkeytype: открой тест и нажми F8")
+            self.start.setEnabled(self.worker_thread is None)
         else:
             self.start.setText("Начать через 3 секунды")
             self.status.setText("Готов · F8 старт · F9 стоп · F10 пауза")
+            self.start.setEnabled(bool(self.editor.toPlainText().strip()) and self.worker_thread is None)
         self._schedule_save()
 
     def _load_profile(self, profile: TypingProfile) -> None:
@@ -95,6 +97,11 @@ class MainWindow(MainWindowView):
         super()._refresh_labels()
         if hasattr(self, "words_value"):
             self.words_value.setText(f"≈ {self.words.value()}")
+
+    def _refresh_preview(self) -> None:
+        super()._refresh_preview()
+        if self.monkeytype_mode.isChecked() and self.worker_thread is None:
+            self.start.setEnabled(True)
 
     @Slot()
     def _hotkey_start(self) -> None:
@@ -152,6 +159,8 @@ class MainWindow(MainWindowView):
     def _thread_cleared(self) -> None:
         self.worker = None
         super()._thread_cleared()
+        if self.monkeytype_mode.isChecked():
+            self.start.setEnabled(True)
 
     def closeEvent(self, event) -> None:
         self.pause_hotkey.close()
