@@ -13,7 +13,11 @@ from typerx.domain.splitter import SplitPlan
 from typerx.domain.typos import TypoKind, TypoPlanner
 from typerx.domain.typing_physics import finger_for_key
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
-from typerx.services.monkeytype_pacing import DeadlinePacer, event_interval_seconds
+from typerx.services.monkeytype_pacing import (
+    DeadlinePacer,
+    event_interval_seconds,
+    fit_typos_to_raw_limit,
+)
 from typerx.services.typing_service import TypingCancelled, TypingService
 
 
@@ -129,7 +133,7 @@ class MonkeytypeService(TypingService):
             progress(0, len(text))
             rng = random.Random()
             rhythm = RhythmEngine(profile.normalized(), rng)
-            typos = (
+            planned_typos = (
                 TypoPlanner(
                     profile.typo_rate,
                     rng,
@@ -138,6 +142,12 @@ class MonkeytypeService(TypingService):
                 ).plan(text)
                 if profile.fix_typos
                 else {}
+            )
+            typos = fit_typos_to_raw_limit(
+                text,
+                profile.wpm,
+                planned_typos,
+                profile.correct_typos,
             )
             interval = event_interval_seconds(text, profile.wpm, typos, profile.correct_typos)
             pacer = DeadlinePacer(time.perf_counter(), interval)
@@ -179,7 +189,6 @@ class MonkeytypeService(TypingService):
                     wait_until(conflict[0])
                 if len(pending) >= self.MAX_HELD_KEYS:
                     wait_until(min(entry[0] for entry in pending))
-
                 natural_dwell, _ = rhythm.keystroke_timing(char, prior)
                 dwell = min(natural_dwell, max(0.012, interval * 0.82))
                 key = output.press(char)
