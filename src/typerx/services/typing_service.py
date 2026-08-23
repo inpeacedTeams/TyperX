@@ -54,10 +54,8 @@ class ChallengeWatcher:
         result: set[tuple[object, str]] = set()
         for control in window.descendants(control_type="Text"):
             text = control.window_text().strip()
-            if not text:
-                continue
-            runtime_id = tuple(control.element_info.runtime_id or ())
-            result.add((runtime_id, text))
+            if text:
+                result.add((tuple(control.element_info.runtime_id or ()), text))
         return result
 
     def _run(self) -> None:
@@ -74,9 +72,9 @@ class ChallengeWatcher:
                     continue
                 new_items = current - self._seen
                 self._seen.update(current)
-                if time.monotonic() < self._suppress_until:
-                    continue
-                if any(self._PATTERN.fullmatch(text) for _, text in new_items):
+                if time.monotonic() >= self._suppress_until and any(
+                    self._PATTERN.fullmatch(text) for _, text in new_items
+                ):
                     self._pending.set()
         finally:
             pythoncom.CoUninitialize()
@@ -86,9 +84,32 @@ class TypingService:
     def __init__(self, sleep: Callable[[float], None] = time.sleep) -> None:
         self._sleep = sleep
         self._cancel = threading.Event()
+        self._pause_requested = threading.Event()
+        self._paused = threading.Event()
+        self._pause_lock = threading.Lock()
 
     def cancel(self) -> None:
         self._cancel.set()
+        self._pause_requested.clear()
+        self._paused.clear()
+
+    def toggle_pause(self) -> str:
+        with self._pause_lock:
+            if self._paused.is_set() or self._pause_requested.is_set():
+                self._pause_requested.clear()
+                self._paused.clear()
+                return "resumed"
+            self._pause_requested.set()
+            return "requested"
+
+    def _pause_on_word_boundary(self, at_boundary: bool) -> None:
+        if not at_boundary or not self._pause_requested.is_set():
+            return
+        self._pause_requested.clear()
+        self._paused.set()
+        while self._paused.is_set():
+            if self._cancel.wait(0.05):
+                raise TypingCancelled
 
     def run(
         self,
@@ -98,6 +119,8 @@ class TypingService:
         progress: Callable[[int, int], None],
     ) -> None:
         self._cancel.clear()
+        self._pause_requested.clear()
+        self._paused.clear()
         output = InterceptionKeyboard(target_window)
         pending: list[tuple[float, PressedKey]] = []
         watcher = ChallengeWatcher(target_window) if profile.auto_123_challenge else None
@@ -186,8 +209,14 @@ class TypingService:
                     else:
                         emit_char(char)
 
+                    at_boundary = char.isspace() or char_index == len(message) - 1
+                    if at_boundary:
+                        flush_pending()
+                    self._pause_on_word_boundary(at_boundary)
+
                 answer_challenge()
                 flush_pending()
+                self._pause_on_word_boundary(True)
                 self._wait(rhythm.before_send_pause())
                 emit("\n", output.press_enter)
                 flush_pending()
