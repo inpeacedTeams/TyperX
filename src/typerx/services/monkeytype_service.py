@@ -12,7 +12,7 @@ from typerx.domain.rhythm import RhythmEngine
 from typerx.domain.splitter import SplitPlan
 from typerx.domain.typing_physics import finger_for_key
 from typerx.platform.interception_keyboard import InterceptionKeyboard, PressedKey
-from typerx.services.typing_service import TypingCancelled
+from typerx.services.typing_service import TypingCancelled, TypingService
 
 
 class MonkeytypeInbox:
@@ -103,37 +103,11 @@ class MonkeytypeBridge:
             self.thread.join(timeout=1.0)
 
 
-class MonkeytypeService:
+class MonkeytypeService(TypingService):
     MAX_HELD_KEYS = 3
 
     def __init__(self) -> None:
-        self._cancel = threading.Event()
-        self._pause_requested = threading.Event()
-        self._paused = threading.Event()
-        self._pause_lock = threading.Lock()
-
-    def cancel(self) -> None:
-        self._cancel.set()
-        self._pause_requested.clear()
-        self._paused.clear()
-
-    def toggle_pause(self) -> str:
-        with self._pause_lock:
-            if self._paused.is_set() or self._pause_requested.is_set():
-                self._pause_requested.clear()
-                self._paused.clear()
-                return "resumed"
-            self._pause_requested.set()
-            return "requested"
-
-    def _pause_on_word_boundary(self, at_boundary: bool) -> None:
-        if not at_boundary or not self._pause_requested.is_set():
-            return
-        self._pause_requested.clear()
-        self._paused.set()
-        while self._paused.is_set():
-            if self._cancel.wait(0.05):
-                raise TypingCancelled
+        super().__init__()
 
     def run(
         self,
@@ -144,6 +118,8 @@ class MonkeytypeService:
     ) -> None:
         del plan
         self._cancel.clear()
+        self._pause_requested.clear()
+        self._paused.clear()
         inbox = MonkeytypeInbox()
         bridge = MonkeytypeBridge(inbox)
         bridge.start()
@@ -209,11 +185,3 @@ class MonkeytypeService:
                     pass
             output.close()
             bridge.close()
-
-    def _wait(self, duration: float) -> None:
-        if self._cancel.wait(duration):
-            raise TypingCancelled
-
-    def _check(self) -> None:
-        if self._cancel.is_set():
-            raise TypingCancelled
