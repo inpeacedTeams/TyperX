@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout
 
 from typerx.domain.models import TypingProfile
 from typerx.persistence.store import AppStore
@@ -36,37 +36,48 @@ class MainWindow(MainWindowView):
         super().showEvent(event)
         QTimer.singleShot(0, exclude_process_windows_from_capture)
 
-    def _settings_panel(self):
-        panel = super()._settings_panel()
-        layout = panel.layout()
+    def _build_extra_settings(self, layout: QVBoxLayout) -> None:
+        layout.addSpacing(6)
+        layout.addWidget(self._eyebrow("ДЛИНА СООБЩЕНИЯ"))
         row = QHBoxLayout()
         row.addWidget(QLabel("Слов в сообщении"))
         row.addStretch()
         self.words_value = QLabel()
-        self.words_value.setStyleSheet("color:#6d43c5;font-weight:700")
+        self.words_value.setObjectName("value")
         row.addWidget(self.words_value)
         self.words = QSlider(Qt.Orientation.Horizontal)
         self.words.setRange(1, 16)
-        self.words.setToolTip("TyperX будет стремиться к этой длине, иногда отклоняясь на одно слово")
+        self.words.setToolTip("TyperX стремится к этой длине, иногда отклоняясь на одно слово")
         self.words.valueChanged.connect(self._settings_changed)
-        layout.insertLayout(7, row)
-        layout.insertWidget(8, self.words)
+        layout.addLayout(row)
+        layout.addWidget(self.words)
 
-        self.correct_typos = QCheckBox("Исправлять опечатки через Backspace")
-        self.correct_typos.setToolTip("Выключи, чтобы TyperX оставлял опечатки без Backspace-исправлений")
+        layout.addSpacing(6)
+        layout.addWidget(self._eyebrow("РЕЖИМ"))
+        self.correct_typos = QCheckBox("Исправлять через Backspace")
+        self.correct_typos.setToolTip("Выключи, чтобы оставлять часть опечаток в сообщениях")
         self.correct_typos.toggled.connect(self._settings_changed)
-        layout.insertWidget(13, self.correct_typos)
-
         self.auto_123 = QCheckBox("Автоответ на запрос 123")
         self.auto_123.toggled.connect(self._settings_changed)
-        layout.insertWidget(14, self.auto_123)
-
         self.monkeytype_mode = QCheckBox("Monkeytype автотайп")
-        self.monkeytype_mode.setToolTip(
-            "Для practice/custom тестов. Установи companion extension, открой тест и нажми F8"
-        )
-        layout.insertWidget(15, self.monkeytype_mode)
-        return panel
+        self.monkeytype_mode.setToolTip("Открой practice/custom тест с companion extension и нажми F8")
+        self.monkeytype_mode.toggled.connect(self._monkeytype_toggled)
+        layout.addWidget(self.correct_typos)
+        layout.addWidget(self.auto_123)
+        layout.addWidget(self.monkeytype_mode)
+
+    def _monkeytype_toggled(self, enabled: bool) -> None:
+        if not hasattr(self, "start"):
+            return
+        if enabled:
+            self.start.setText("Подключить Monkeytype")
+            self.status.setText("Monkeytype: открой тест и нажми F8")
+            self.start.setEnabled(self.worker_thread is None)
+        else:
+            self.start.setText("Начать через 3 секунды")
+            self.status.setText("Готов · F8 старт · F9 стоп · F10 пауза")
+            self.start.setEnabled(bool(self.editor.toPlainText().strip()) and self.worker_thread is None)
+        self._schedule_save()
 
     def _load_profile(self, profile: TypingProfile) -> None:
         super()._load_profile(profile)
@@ -86,6 +97,11 @@ class MainWindow(MainWindowView):
         super()._refresh_labels()
         if hasattr(self, "words_value"):
             self.words_value.setText(f"≈ {self.words.value()}")
+
+    def _refresh_preview(self) -> None:
+        super()._refresh_preview()
+        if self.monkeytype_mode.isChecked() and self.worker_thread is None:
+            self.start.setEnabled(True)
 
     @Slot()
     def _hotkey_start(self) -> None:
@@ -143,6 +159,8 @@ class MainWindow(MainWindowView):
     def _thread_cleared(self) -> None:
         self.worker = None
         super()._thread_cleared()
+        if self.monkeytype_mode.isChecked():
+            self.start.setEnabled(True)
 
     def closeEvent(self, event) -> None:
         self.pause_hotkey.close()

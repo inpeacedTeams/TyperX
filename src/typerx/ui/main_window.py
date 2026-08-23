@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSplitter,
     QTextEdit,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from typerx.domain.models import TextTemplate, TypingProfile
+from typerx.domain.models import TypingProfile
 from typerx.domain.splitter import SmartSplitter, SplitPlan
 from typerx.persistence.store import AppStore, new_template
 from typerx.platform.windows import FocusChangedError, GlobalHotkeys
@@ -41,28 +42,14 @@ class TypingWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
 
-    def __init__(
-        self,
-        service: TypingService,
-        plan: SplitPlan,
-        profile: TypingProfile,
-        target: int,
-    ) -> None:
+    def __init__(self, service: TypingService, plan: SplitPlan, profile: TypingProfile, target: int) -> None:
         super().__init__()
-        self.service = service
-        self.plan = plan
-        self.profile = profile
-        self.target = target
+        self.service, self.plan, self.profile, self.target = service, plan, profile, target
 
     @Slot()
     def run(self) -> None:
         try:
-            self.service.run(
-                self.plan,
-                self.profile,
-                self.target,
-                self.progress.emit,
-            )
+            self.service.run(self.plan, self.profile, self.target, self.progress.emit)
             self.finished.emit(f"Готово: {len(self.plan.messages)} сообщений")
         except TypingCancelled:
             self.finished.emit("Остановлено")
@@ -77,13 +64,9 @@ class TypingWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self, store: AppStore) -> None:
         super().__init__()
-        self.store = store
-        self.state = store.load()
-        self.splitter = SmartSplitter()
-        self.service = None
-        self.worker_thread = None
+        self.store, self.state = store, store.load()
+        self.splitter, self.service, self.worker_thread = SmartSplitter(), None, None
         self._loading = True
-
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self._persist)
@@ -91,10 +74,9 @@ class MainWindow(QMainWindow):
         self.bridge.start.connect(self._hotkey_start)
         self.bridge.stop.connect(self.stop_typing)
         self.hotkeys = GlobalHotkeys(self.bridge.start.emit, self.bridge.stop.emit)
-
         self.setWindowTitle("TyperX")
         self.resize(self.state.window_width, self.state.window_height)
-        self.setMinimumSize(1040, 680)
+        self.setMinimumSize(1120, 720)
         self.setStyleSheet(stylesheet())
         self._build_ui()
         self._populate_templates()
@@ -105,84 +87,175 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         root = QWidget()
-        root.setObjectName("root")
+        root.setObjectName("appRoot")
         shell = QVBoxLayout(root)
-        shell.setContentsMargins(20, 16, 20, 14)
+        shell.setContentsMargins(20, 18, 20, 16)
         shell.setSpacing(14)
+        shell.addWidget(self._top_bar())
 
-        header = QHBoxLayout()
-        header.setSpacing(12)
-        mark = QLabel("TX")
-        mark.setObjectName("mark")
-        mark.setFixedSize(42, 42)
-        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        identity = QVBoxLayout()
-        identity.setSpacing(0)
-        brand = QLabel("TyperX")
-        brand.setObjectName("brand")
-        tagline = QLabel("NATURAL INPUT STUDIO")
-        tagline.setObjectName("eyebrow")
-        identity.addWidget(brand)
-        identity.addWidget(tagline)
-
-        self.status = QLabel("Готов · F8 старт · F9 стоп")
-        self.status.setObjectName("status")
-        self.status.setMinimumWidth(220)
-        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.stop = QPushButton("Стоп · F9")
-        self.stop.setObjectName("quiet")
-        self.stop.setEnabled(False)
-        self.stop.clicked.connect(self.stop_typing)
-
-        self.start = QPushButton("Запустить через 3 сек")
-        self.start.setObjectName("primary")
-        self.start.clicked.connect(self.start_countdown)
-
-        header.addWidget(mark)
-        header.addLayout(identity)
-        header.addStretch()
-        header.addWidget(self.status)
-        header.addWidget(self.stop)
-        header.addWidget(self.start)
-        shell.addLayout(header)
-
-        rule = QFrame()
-        rule.setObjectName("rule")
-        rule.setFrameShape(QFrame.Shape.HLine)
-        shell.addWidget(rule)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setObjectName("workspaceSplitter")
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(10)
-        splitter.addWidget(self._templates_panel())
-        splitter.addWidget(self._editor_panel())
-        splitter.addWidget(self._settings_panel())
-        splitter.setSizes([230, 720, 292])
-        shell.addWidget(splitter, 1)
-
-        footer = QHBoxLayout()
-        footer.setSpacing(16)
-        privacy = QLabel("Локально. Без аккаунта. Без облака.")
-        privacy.setObjectName("muted")
-        hotkeys = QLabel("F8 запуск   F9 стоп   F10 пауза")
-        hotkeys.setObjectName("mono")
-        footer.addWidget(privacy)
-        footer.addStretch()
-        footer.addWidget(hotkeys)
-        shell.addLayout(footer)
+        body = QSplitter(Qt.Orientation.Horizontal)
+        body.setChildrenCollapsible(False)
+        body.setHandleWidth(10)
+        body.addWidget(self._library_panel())
+        body.addWidget(self._workspace_panel())
+        body.addWidget(self._settings_panel())
+        body.setSizes([245, 650, 290])
+        shell.addWidget(body, 1)
+        shell.addWidget(self._run_bar())
         self.setCentralWidget(root)
 
-    @staticmethod
-    def _panel(role: str) -> tuple[QFrame, QVBoxLayout]:
+    def _top_bar(self) -> QFrame:
         frame = QFrame()
-        frame.setObjectName(role)
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(16, 16, 16, 16)
+        frame.setObjectName("topBar")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+        mark = QLabel("TX")
+        mark.setFixedSize(38, 38)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setStyleSheet("background:#7650c9;color:#fdfbff;border-radius:11px;font-weight:800")
+        brand = QLabel("TyperX")
+        brand.setObjectName("brand")
+        context = QLabel("typing studio")
+        context.setObjectName("muted")
+        self.status = QLabel("Готов · F8 старт · F9 стоп")
+        self.status.setObjectName("status")
+        layout.addWidget(mark)
+        layout.addWidget(brand)
+        layout.addWidget(context)
+        layout.addStretch()
+        layout.addWidget(self.status)
+        return frame
+
+    def _library_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("library")
+        panel.setMinimumWidth(220)
+        panel.setMaximumWidth(310)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 16, 14, 14)
         layout.setSpacing(10)
-        return frame, layout
+        heading = QLabel("Библиотека")
+        heading.setObjectName("sectionTitle")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Найти шаблон")
+        self.search.textChanged.connect(self._filter_templates)
+        self.templates = QListWidget()
+        self.templates.currentItemChanged.connect(self._template_selected)
+        actions = QHBoxLayout()
+        add = QPushButton("+ Новый")
+        add.clicked.connect(self._new_template)
+        self.delete = QPushButton("Удалить")
+        self.delete.setObjectName("danger")
+        self.delete.clicked.connect(self._delete_template)
+        actions.addWidget(add)
+        actions.addWidget(self.delete)
+        layout.addWidget(heading)
+        layout.addWidget(self.search)
+        layout.addWidget(self.templates, 1)
+        layout.addLayout(actions)
+        return panel
+
+    def _workspace_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("workspace")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+        intro = QHBoxLayout()
+        page = QLabel("Текст и отправка")
+        page.setObjectName("pageTitle")
+        self.counter = QLabel("0 знаков")
+        self.counter.setObjectName("muted")
+        intro.addWidget(page)
+        intro.addStretch()
+        intro.addWidget(self.counter)
+        self.title = QLineEdit()
+        self.title.setObjectName("titleInput")
+        self.title.setPlaceholderText("Название шаблона")
+        self.title.textChanged.connect(self._content_changed)
+        self.editor = QTextEdit()
+        self.editor.setPlaceholderText("Вставь текст. TyperX превратит его в естественную переписку.")
+        self.editor.textChanged.connect(self._content_changed)
+        preview_header = QHBoxLayout()
+        preview_title = QLabel("План сообщений")
+        preview_title.setObjectName("sectionTitle")
+        self.plan_meta = QLabel()
+        self.plan_meta.setObjectName("muted")
+        preview_header.addWidget(preview_title)
+        preview_header.addStretch()
+        preview_header.addWidget(self.plan_meta)
+        self.preview = QListWidget()
+        self.preview.setObjectName("preview")
+        self.preview.setMinimumHeight(150)
+        self.save = QPushButton("Сохранить шаблон")
+        self.save.clicked.connect(self._save_current)
+        layout.addLayout(intro)
+        layout.addWidget(self.title)
+        layout.addWidget(self.editor, 3)
+        layout.addLayout(preview_header)
+        layout.addWidget(self.preview, 2)
+        layout.addWidget(self.save, 0, Qt.AlignmentFlag.AlignRight)
+        return panel
+
+    def _settings_panel(self) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumWidth(270)
+        scroll.setMaximumWidth(340)
+        panel = QFrame()
+        panel.setObjectName("inspector")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 4, 4, 4)
+        layout.setSpacing(10)
+        title = QLabel("Настройка ритма")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+        self.wpm, self.wpm_value = self._slider(layout, "Скорость", 25, 300)
+        self.variation, self.variation_value = self._slider(layout, "Разброс", 0, 55)
+        self.typos, self.typos_value = self._slider(layout, "Опечатки", 0, 40)
+        layout.addSpacing(6)
+        layout.addWidget(self._eyebrow("ПОВЕДЕНИЕ"))
+        self.smart = QCheckBox("Умно делить на сообщения")
+        self.fix_typos = QCheckBox("Добавлять живые опечатки")
+        self.pause_marks = QCheckBox("Паузы после пунктуации")
+        self.keep_marks = QCheckBox("Сохранять пунктуацию")
+        for checkbox in (self.smart, self.fix_typos, self.pause_marks, self.keep_marks):
+            checkbox.toggled.connect(self._settings_changed)
+            layout.addWidget(checkbox)
+        self._build_extra_settings(layout)
+        note = QLabel("F8 запускает ввод в активном окне. Смена окна мгновенно останавливает печать.")
+        note.setWordWrap(True)
+        note.setObjectName("note")
+        layout.addWidget(note)
+        layout.addStretch()
+        scroll.setWidget(panel)
+        return scroll
+
+    def _build_extra_settings(self, layout: QVBoxLayout) -> None:
+        del layout
+
+    def _run_bar(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("runBar")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(16, 10, 12, 10)
+        label = QLabel("Фокусни поле ввода, затем запускай")
+        label.setObjectName("helper")
+        hotkeys = QLabel("F8 start   F9 stop   F10 pause")
+        hotkeys.setObjectName("muted")
+        self.stop = QPushButton("Остановить")
+        self.stop.setEnabled(False)
+        self.stop.clicked.connect(self.stop_typing)
+        self.start = QPushButton("Начать через 3 секунды")
+        self.start.setObjectName("primary")
+        self.start.clicked.connect(self.start_countdown)
+        layout.addWidget(label)
+        layout.addWidget(hotkeys)
+        layout.addStretch()
+        layout.addWidget(self.stop)
+        layout.addWidget(self.start)
+        return frame
 
     @staticmethod
     def _eyebrow(text: str) -> QLabel:
@@ -190,139 +263,12 @@ class MainWindow(QMainWindow):
         label.setObjectName("eyebrow")
         return label
 
-    def _templates_panel(self) -> QFrame:
-        panel, layout = self._panel("library")
-        heading = QLabel("Библиотека")
-        heading.setObjectName("sectionTitle")
-        layout.addWidget(heading)
-        layout.addWidget(self._eyebrow("ТЕКСТЫ И ШАБЛОНЫ"))
-
-        self.search = QLineEdit()
-        self.search.setObjectName("search")
-        self.search.setPlaceholderText("Найти текст...")
-        self.search.textChanged.connect(self._filter_templates)
-        layout.addWidget(self.search)
-
-        self.templates = QListWidget()
-        self.templates.setObjectName("templates")
-        self.templates.setSpacing(2)
-        self.templates.currentItemChanged.connect(self._template_selected)
-        layout.addWidget(self.templates, 1)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        add = QPushButton("+ Новый")
-        add.clicked.connect(self._new_template)
-        self.delete = QPushButton("Удалить")
-        self.delete.setObjectName("danger")
-        self.delete.clicked.connect(self._delete_template)
-        actions.addWidget(add, 1)
-        actions.addWidget(self.delete)
-        layout.addLayout(actions)
-        panel.setMinimumWidth(210)
-        panel.setMaximumWidth(320)
-        return panel
-
-    def _editor_panel(self) -> QFrame:
-        panel, layout = self._panel("editorPanel")
-
-        top = QHBoxLayout()
-        top.setSpacing(12)
-        title_stack = QVBoxLayout()
-        title_stack.setSpacing(2)
-        title_stack.addWidget(self._eyebrow("АКТИВНЫЙ ТЕКСТ"))
-        self.title = QLineEdit()
-        self.title.setObjectName("titleInput")
-        self.title.setPlaceholderText("Название шаблона")
-        title_stack.addWidget(self.title)
-        self.counter = QLabel("0 знаков")
-        self.counter.setObjectName("mono")
-        self.save = QPushButton("Сохранить")
-        self.save.setObjectName("quiet")
-        self.save.clicked.connect(self._save_current)
-        top.addLayout(title_stack, 1)
-        top.addWidget(self.counter, 0, Qt.AlignmentFlag.AlignBottom)
-        top.addWidget(self.save, 0, Qt.AlignmentFlag.AlignBottom)
-        layout.addLayout(top)
-
-        self.editor = QTextEdit()
-        self.editor.setObjectName("editor")
-        self.editor.setAcceptRichText(False)
-        self.editor.setPlaceholderText(
-            "Вставь текст. TyperX разобьёт его на живые сообщения и сохранит ритм."
-        )
-        self.editor.textChanged.connect(self._content_changed)
-        self.title.textChanged.connect(self._content_changed)
-        layout.addWidget(self.editor, 3)
-
-        preview_header = QHBoxLayout()
-        preview_title = QLabel("Очередь отправки")
-        preview_title.setObjectName("sectionTitle")
-        self.plan_meta = QLabel("0 сообщений")
-        self.plan_meta.setObjectName("mono")
-        preview_header.addWidget(preview_title)
-        preview_header.addStretch()
-        preview_header.addWidget(self.plan_meta)
-        layout.addLayout(preview_header)
-
-        self.preview = QListWidget()
-        self.preview.setObjectName("preview")
-        self.preview.setMinimumHeight(160)
-        self.preview.setSpacing(4)
-        layout.addWidget(self.preview, 2)
-        return panel
-
-    def _settings_panel(self) -> QFrame:
-        panel, layout = self._panel("inspector")
-        heading = QLabel("Ритм")
-        heading.setObjectName("sectionTitle")
-        layout.addWidget(heading)
-
-        self.wpm, self.wpm_value = self._slider(layout, "Скорость", 25, 300)
-        self.variation, self.variation_value = self._slider(layout, "Разброс", 0, 55)
-        self.typos, self.typos_value = self._slider(layout, "Опечатки", 0, 40)
-
-        layout.addSpacing(8)
-        layout.addWidget(self._eyebrow("ПОВЕДЕНИЕ"))
-        self.smart = QCheckBox("Делить по смыслу")
-        self.fix_typos = QCheckBox("Добавлять живые опечатки")
-        self.pause_marks = QCheckBox("Паузы после знаков")
-        self.keep_marks = QCheckBox("Сохранять пунктуацию")
-        for checkbox in (
-            self.smart,
-            self.fix_typos,
-            self.pause_marks,
-            self.keep_marks,
-        ):
-            checkbox.toggled.connect(self._settings_changed)
-            layout.addWidget(checkbox)
-
-        note = QLabel(
-            "TyperX останавливается при смене окна. В Monkeytype ошибки видны, "
-            "а затем исправляются через Backspace."
-        )
-        note.setObjectName("note")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        layout.addStretch()
-        panel.setMinimumWidth(270)
-        panel.setMaximumWidth(350)
-        return panel
-
-    def _slider(
-        self,
-        layout: QVBoxLayout,
-        name: str,
-        minimum: int,
-        maximum: int,
-    ) -> tuple[QSlider, QLabel]:
+    def _slider(self, layout: QVBoxLayout, name: str, minimum: int, maximum: int):
         row = QHBoxLayout()
-        label = QLabel(name)
-        label.setObjectName("controlLabel")
+        row.addWidget(QLabel(name))
+        row.addStretch()
         value = QLabel()
         value.setObjectName("value")
-        row.addWidget(label)
-        row.addStretch()
         row.addWidget(value)
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(minimum, maximum)
@@ -336,13 +282,11 @@ class MainWindow(QMainWindow):
         for template in self.state.templates:
             item = QListWidgetItem(template.title)
             item.setData(Qt.ItemDataRole.UserRole, template.id)
-            item.setToolTip(template.text[:240])
             self.templates.addItem(item)
 
     def _select_initial(self) -> None:
         for index in range(self.templates.count()):
-            item = self.templates.item(index)
-            if item.data(Qt.ItemDataRole.UserRole) == self.state.selected_template_id:
+            if self.templates.item(index).data(Qt.ItemDataRole.UserRole) == self.state.selected_template_id:
                 self.templates.setCurrentRow(index)
                 return
         if self.templates.count():
@@ -369,21 +313,14 @@ class MainWindow(QMainWindow):
             keep_punctuation=self.keep_marks.isChecked(),
         ).normalized()
 
-    def _current_template(self) -> TextTemplate | None:
+    def _current_template(self):
         item = self.templates.currentItem()
         if not item:
             return None
         template_id = item.data(Qt.ItemDataRole.UserRole)
-        return next(
-            (template for template in self.state.templates if template.id == template_id),
-            None,
-        )
+        return next((x for x in self.state.templates if x.id == template_id), None)
 
-    def _template_selected(
-        self,
-        current: QListWidgetItem | None,
-        previous: QListWidgetItem | None,
-    ) -> None:
+    def _template_selected(self, current, previous) -> None:
         del previous
         if current is None:
             return
@@ -402,6 +339,7 @@ class MainWindow(QMainWindow):
     def _content_changed(self) -> None:
         if self._loading:
             return
+        self.counter.setText(f"{len(self.editor.toPlainText())} знаков")
         self._refresh_preview()
 
     def _settings_changed(self) -> None:
@@ -418,16 +356,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_preview(self) -> None:
         text = self.editor.toPlainText()
-        self.counter.setText(f"{len(text):,} знаков".replace(",", " "))
         self.preview.clear()
         plan = self.splitter.plan(text, self._profile(), seed=hash(text) & 0xFFFFFFFF)
-        for index, message in enumerate(plan.messages, start=1):
-            item = QListWidgetItem(f"{index:02d}   {message}")
+        for number, message in enumerate(plan.messages, 1):
+            item = QListWidgetItem(f"{number:02}   {message}")
             item.setToolTip(message)
             self.preview.addItem(item)
-        self.plan_meta.setText(
-            f"{len(plan.messages)} сообщений · {plan.character_count} знаков"
-        )
+        self.plan_meta.setText(f"{len(plan.messages)} сообщений · {plan.character_count} знаков")
         self.start.setEnabled(bool(plan.messages) and self.worker_thread is None)
 
     def _new_template(self) -> None:
@@ -445,10 +380,7 @@ class MainWindow(QMainWindow):
         if template is None:
             return
         if template.builtin:
-            clone = new_template(
-                self.title.text().strip() or template.title,
-                self.editor.toPlainText(),
-            )
+            clone = new_template(self.title.text().strip() or template.title, self.editor.toPlainText())
             self.state.templates.append(clone)
             self.state.selected_template_id = clone.id
         else:
@@ -463,12 +395,7 @@ class MainWindow(QMainWindow):
         template = self._current_template()
         if template is None or template.builtin:
             return
-        answer = QMessageBox.question(
-            self,
-            "Удалить шаблон?",
-            f"«{template.title}» нельзя будет восстановить.",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, "Удалить шаблон?", f"«{template.title}» нельзя будет восстановить.") != QMessageBox.StandardButton.Yes:
             return
         self.state.templates.remove(template)
         self.state.selected_template_id = self.state.templates[0].id
@@ -481,11 +408,8 @@ class MainWindow(QMainWindow):
         for index in range(self.templates.count()):
             item = self.templates.item(index)
             template_id = item.data(Qt.ItemDataRole.UserRole)
-            template = next(
-                entry for entry in self.state.templates if entry.id == template_id
-            )
-            haystack = f"{template.title} {template.text}".casefold()
-            item.setHidden(needle not in haystack)
+            template = next(x for x in self.state.templates if x.id == template_id)
+            item.setHidden(needle not in f"{template.title} {template.text}".casefold())
 
     def start_countdown(self) -> None:
         if self.worker_thread is not None:
@@ -497,7 +421,7 @@ class MainWindow(QMainWindow):
         if remaining <= 0:
             self._hotkey_start()
             return
-        self.status.setText(f"Выбери окно: старт через {remaining}")
+        self.status.setText(f"Фокус на поле ввода: старт через {remaining}")
         QTimer.singleShot(1000, lambda: self._countdown(remaining - 1))
 
     def _hotkey_start(self) -> None:
