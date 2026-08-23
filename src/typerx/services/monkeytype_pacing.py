@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from typerx.domain.typos import Typo
+
+SAFE_RAW_WPM = 340
 
 
 def scored_character_count(
@@ -31,12 +34,51 @@ def scored_character_count(
     return max(1, scored)
 
 
+def _word_penalties(text: str, typos: dict[int, Typo]) -> dict[int, int]:
+    penalties: dict[int, int] = {}
+    word_start: int | None = None
+    for index, char in enumerate(text + " "):
+        if not char.isspace() and word_start is None:
+            word_start = index
+        if not char.isspace() or word_start is None:
+            continue
+        typo_indexes = [position for position in typos if word_start <= position < index]
+        if typo_indexes:
+            penalty = index - word_start + (1 if index < len(text) else 0)
+            for position in typo_indexes:
+                penalties[position] = penalty
+        word_start = None
+    return penalties
+
+
+def fit_typos_to_raw_limit(
+    text: str,
+    target_wpm: int,
+    typos: dict[int, Typo],
+    correct_typos: bool,
+    raw_limit: int = SAFE_RAW_WPM,
+) -> dict[int, Typo]:
+    """Keep as many errors as possible without making Monkeytype reject raw WPM."""
+    if correct_typos or not typos or target_wpm >= raw_limit:
+        return {} if not correct_typos and target_wpm >= raw_limit else dict(typos)
+
+    kept = dict(typos)
+    required_scored = math.ceil(len(text) * target_wpm / raw_limit)
+    penalties = _word_penalties(text, kept)
+    # Recover the most scored characters per removed error first. This leaves
+    # the largest possible number of visible mistakes under Monkeytype's cap.
+    for index in sorted(kept, key=lambda item: penalties.get(item, 0), reverse=True):
+        if scored_character_count(text, kept, False) >= required_scored:
+            break
+        kept.pop(index)
+    return kept
+
+
 def emitted_event_count(
     text: str,
     typos: dict[int, Typo],
     correct_typos: bool,
 ) -> int:
-    # A corrected typo adds a wrong key and Backspace before the original key.
     return max(1, len(text) + (2 * len(typos) if correct_typos else 0))
 
 
