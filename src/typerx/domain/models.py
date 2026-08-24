@@ -12,6 +12,7 @@ class TypingProfile:
     typo_rate: float = 12.0
     words_per_message: int = 5
     smart_split: bool = True
+    single_message: bool = False
     fix_typos: bool = True
     correct_typos: bool = True
     punctuation_pauses: bool = True
@@ -27,6 +28,7 @@ class TypingProfile:
             typo_rate=max(0.0, min(40.0, float(self.typo_rate))),
             words_per_message=max(1, min(16, int(self.words_per_message))),
             smart_split=bool(self.smart_split),
+            single_message=bool(self.single_message),
             fix_typos=bool(self.fix_typos),
             correct_typos=bool(self.correct_typos),
             punctuation_pauses=bool(self.punctuation_pauses),

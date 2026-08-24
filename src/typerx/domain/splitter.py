@@ -32,6 +32,8 @@ class SmartSplitter:
         if not clean:
             return SplitPlan(())
         profile = profile.normalized()
+        if profile.single_message:
+            return SplitPlan(self._punctuation((clean,), profile.keep_punctuation))
         if not profile.smart_split:
             messages = tuple(x.strip() for x in _PARAGRAPH_RE.split(clean) if x.strip())
             return SplitPlan(self._punctuation(messages, profile.keep_punctuation))

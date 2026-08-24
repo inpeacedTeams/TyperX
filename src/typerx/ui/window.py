@@ -68,9 +68,15 @@ class MainWindow(MainWindowView):
         layout.insertWidget(15, self.monkeytype_mode)
         return panel
 
+    def _on_single_message_toggled(self, checked: bool) -> None:
+        super()._on_single_message_toggled(checked)
+        if hasattr(self, "words"):
+            self.words.setEnabled(not checked)
+
     def _load_profile(self, profile: TypingProfile) -> None:
         super()._load_profile(profile)
         self.words.setValue(profile.words_per_message)
+        self.words.setEnabled(not getattr(profile, "single_message", False))
         self.correct_typos.setChecked(profile.correct_typos)
         self.auto_123.setChecked(profile.auto_123_challenge)
         self._refresh_labels()

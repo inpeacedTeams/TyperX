@@ -99,12 +99,22 @@ class MainWindow(QMainWindow):
     def _settings_panel(self):
         panel, layout = self._panel(); layout.addWidget(self._eyebrow("РИТМ")); self.wpm, self.wpm_value = self._slider(layout, "Скорость", 25, 300)
         self.variation, self.variation_value = self._slider(layout, "Разброс", 0, 55); self.typos, self.typos_value = self._slider(layout, "Опечатки", 0, 40)
-        layout.addSpacing(8); layout.addWidget(self._eyebrow("ПОВЕДЕНИЕ")); self.smart = QCheckBox("Умно делить на сообщения"); self.fix_typos = QCheckBox("Добавлять живые опечатки")
-        self.pause_marks = QCheckBox("Задумываться после знаков"); self.keep_marks = QCheckBox("Сохранять пунктуацию")
-        for checkbox in (self.smart, self.fix_typos, self.pause_marks, self.keep_marks): checkbox.toggled.connect(self._settings_changed); layout.addWidget(checkbox)
+        layout.addSpacing(8); layout.addWidget(self._eyebrow("ПОВЕДЕНИЕ"))
+        self.single_message = QCheckBox("Одним сообщением")
+        self.smart = QCheckBox("Умно делить на сообщения")
+        self.fix_typos = QCheckBox("Добавлять живые опечатки")
+        self.pause_marks = QCheckBox("Задумываться после знаков")
+        self.keep_marks = QCheckBox("Сохранять пунктуацию")
+        for checkbox in (self.single_message, self.smart, self.fix_typos, self.pause_marks, self.keep_marks):
+            checkbox.toggled.connect(self._settings_changed)
+            layout.addWidget(checkbox)
+        self.single_message.toggled.connect(self._on_single_message_toggled)
         note = QLabel("Опечатки иногда остаются в сообщении, иногда исправляются через Backspace. Смена окна сразу останавливает ввод."); note.setWordWrap(True); note.setObjectName("muted"); note.setStyleSheet("background:#f0ecf7;border-radius:12px;padding:12px;line-height:1.4"); layout.addWidget(note); layout.addStretch()
         self.start = QPushButton("Начать через 3 секунды"); self.start.setObjectName("primary"); self.start.clicked.connect(self.start_countdown); self.stop = QPushButton("Остановить · F9"); self.stop.setEnabled(False); self.stop.clicked.connect(self.stop_typing)
         layout.addWidget(self.start); layout.addWidget(self.stop); panel.setMinimumWidth(265); panel.setMaximumWidth(340); return panel
+
+    def _on_single_message_toggled(self, checked: bool) -> None:
+        self.smart.setEnabled(not checked)
 
     def _slider(self, layout, name, minimum, maximum):
         row = QHBoxLayout(); row.addWidget(QLabel(name)); row.addStretch(); value = QLabel(); value.setStyleSheet("color:#6d43c5;font-weight:700"); row.addWidget(value)
@@ -121,10 +131,23 @@ class MainWindow(QMainWindow):
         if self.templates.count(): self.templates.setCurrentRow(0)
 
     def _load_profile(self, p):
-        self.wpm.setValue(p.wpm); self.variation.setValue(p.variation); self.typos.setValue(round(p.typo_rate)); self.smart.setChecked(p.smart_split); self.fix_typos.setChecked(p.fix_typos); self.pause_marks.setChecked(p.punctuation_pauses); self.keep_marks.setChecked(p.keep_punctuation); self._refresh_labels()
+        self.wpm.setValue(p.wpm); self.variation.setValue(p.variation); self.typos.setValue(round(p.typo_rate))
+        self.single_message.setChecked(getattr(p, "single_message", False))
+        self.smart.setChecked(p.smart_split)
+        self.smart.setEnabled(not getattr(p, "single_message", False))
+        self.fix_typos.setChecked(p.fix_typos); self.pause_marks.setChecked(p.punctuation_pauses); self.keep_marks.setChecked(p.keep_punctuation); self._refresh_labels()
 
     def _profile(self):
-        return TypingProfile(wpm=self.wpm.value(), variation=self.variation.value(), typo_rate=float(self.typos.value()), smart_split=self.smart.isChecked(), fix_typos=self.fix_typos.isChecked(), punctuation_pauses=self.pause_marks.isChecked(), keep_punctuation=self.keep_marks.isChecked()).normalized()
+        return TypingProfile(
+            wpm=self.wpm.value(),
+            variation=self.variation.value(),
+            typo_rate=float(self.typos.value()),
+            single_message=self.single_message.isChecked(),
+            smart_split=self.smart.isChecked(),
+            fix_typos=self.fix_typos.isChecked(),
+            punctuation_pauses=self.pause_marks.isChecked(),
+            keep_punctuation=self.keep_marks.isChecked(),
+        ).normalized()
 
     def _current_template(self):
         item = self.templates.currentItem()
