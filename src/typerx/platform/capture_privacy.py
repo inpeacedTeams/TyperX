@@ -40,7 +40,6 @@ def exclude_process_windows_from_capture() -> int:
             ):
                 protected += 1
         except Exception:
-            # Privacy is optional. Never let it interfere with keyboard I/O.
             pass
         return True
 

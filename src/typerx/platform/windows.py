@@ -50,17 +50,12 @@ if IS_WINDOWS:
     user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
     user32.SendInput.restype = wintypes.UINT
     user32.GetForegroundWindow.restype = wintypes.HWND
-
-    # VK-based input: translate characters to virtual-key codes.
     user32.VkKeyScanExW.argtypes = (wintypes.WCHAR, wintypes.HKL)
     user32.VkKeyScanExW.restype = ctypes.c_short
-
     user32.MapVirtualKeyExW.argtypes = (wintypes.UINT, wintypes.UINT, wintypes.HKL)
     user32.MapVirtualKeyExW.restype = wintypes.UINT
-
     user32.GetKeyboardLayout.argtypes = (wintypes.DWORD,)
     user32.GetKeyboardLayout.restype = wintypes.HKL
-
     user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 
@@ -81,7 +76,7 @@ class WindowsInput:
     VK_BACK = 0x08
     VK_SHIFT = 0x10
     VK_CONTROL = 0x11
-    VK_MENU = 0x12  # Alt
+    VK_MENU = 0x12
 
     def __init__(self, target_window: int) -> None:
         if not IS_WINDOWS:
@@ -105,25 +100,20 @@ class WindowsInput:
         """Type a character using real VK + scan-code keystrokes.
 
         Falls back to Unicode input only for characters absent from the
-        active keyboard layout (emoji, rare symbols).  The VK path is
-        indistinguishable from physical keyboard input to user-mode
-        detection tools.
+        active keyboard layout.
         """
         self.assert_focus()
         hkl = self._get_hkl()
         vk_result = user32.VkKeyScanExW(char, hkl)
 
-        # VkKeyScanExW returns -1 when the character has no key on the layout.
         if vk_result == -1:
             self._write_unicode(char)
             return
 
         vk = vk_result & 0xFF
         shift_state = (vk_result >> 8) & 0xFF
-
         scan = user32.MapVirtualKeyExW(vk, self.MAPVK_VK_TO_VSC, hkl)
 
-        # Build the modifier list.
         modifiers: list[int] = []
         if shift_state & 1:
             modifiers.append(self.VK_SHIFT)
@@ -133,34 +123,16 @@ class WindowsInput:
             modifiers.append(self.VK_MENU)
 
         events: list[INPUT] = []
-
-        # Press modifiers.
         for mod in modifiers:
             mod_scan = user32.MapVirtualKeyExW(mod, self.MAPVK_VK_TO_VSC, hkl)
-            events.append(
-                INPUT(type=1, ki=KEYBDINPUT(wVk=mod, wScan=mod_scan))
-            )
+            events.append(INPUT(type=1, ki=KEYBDINPUT(wVk=mod, wScan=mod_scan)))
 
-        # Key down + key up.
-        events.append(
-            INPUT(type=1, ki=KEYBDINPUT(wVk=vk, wScan=scan))
-        )
-        events.append(
-            INPUT(
-                type=1,
-                ki=KEYBDINPUT(wVk=vk, wScan=scan, dwFlags=self.KEYEVENTF_KEYUP),
-            )
-        )
+        events.append(INPUT(type=1, ki=KEYBDINPUT(wVk=vk, wScan=scan)))
+        events.append(INPUT(type=1, ki=KEYBDINPUT(wVk=vk, wScan=scan, dwFlags=self.KEYEVENTF_KEYUP)))
 
-        # Release modifiers (reverse order, like a real typist).
         for mod in reversed(modifiers):
             mod_scan = user32.MapVirtualKeyExW(mod, self.MAPVK_VK_TO_VSC, hkl)
-            events.append(
-                INPUT(
-                    type=1,
-                    ki=KEYBDINPUT(wVk=mod, wScan=mod_scan, dwFlags=self.KEYEVENTF_KEYUP),
-                )
-            )
+            events.append(INPUT(type=1, ki=KEYBDINPUT(wVk=mod, wScan=mod_scan, dwFlags=self.KEYEVENTF_KEYUP)))
 
         self._send(events)
 
@@ -183,18 +155,10 @@ class WindowsInput:
     def _virtual_key(self, key: int) -> None:
         self.assert_focus()
         scan = user32.MapVirtualKeyExW(key, self.MAPVK_VK_TO_VSC, self._get_hkl())
-        self._send(
-            [
-                INPUT(type=1, ki=KEYBDINPUT(wVk=key, wScan=scan)),
-                INPUT(type=1, ki=KEYBDINPUT(wVk=key, wScan=scan, dwFlags=self.KEYEVENTF_KEYUP)),
-            ]
-        )
+        self._send([INPUT(type=1, ki=KEYBDINPUT(wVk=key, wScan=scan)), INPUT(type=1, ki=KEYBDINPUT(wVk=key, wScan=scan, dwFlags=self.KEYEVENTF_KEYUP))])
 
     def _unicode_input(self, codepoint: int, flags: int) -> INPUT:
-        return INPUT(
-            type=1,
-            ki=KEYBDINPUT(wScan=codepoint, dwFlags=self.KEYEVENTF_UNICODE | flags),
-        )
+        return INPUT(type=1, ki=KEYBDINPUT(wScan=codepoint, dwFlags=self.KEYEVENTF_UNICODE | flags))
 
     @staticmethod
     def _send(events: list[INPUT]) -> None:

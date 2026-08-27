@@ -8,7 +8,7 @@ from typerx.domain.models import TypingProfile
 
 _WORD_RE = re.compile(r"\S+")
 _PARAGRAPH_RE = re.compile(r"\r?\n+")
-_STRIP = " \t,\.!?…:;()[]{}\"'«»"
+_STRIP = " \t,\\.!?…:;()[]{}\"'«»"
 _QUESTION_CUES = {"как", "что", "чем", "где", "когда", "почему", "зачем", "кто", "куда", "откуда"}
 _OPENERS = {"привет", "слушай", "смотри", "короче", "ладно", "кстати", "ну"}
 _SUBJECT_CUES = {"я", "ты", "мы", "вы"}
@@ -71,7 +71,6 @@ class SmartSplitter:
 
     @staticmethod
     def _next_target(preferred: int, rng: random.Random) -> int:
-        # Most messages hit the chosen size; occasional ±1 keeps the cadence from looking robotic.
         return max(1, preferred + rng.choice((-1, 0, 0, 0, 0, 1)))
 
     @staticmethod

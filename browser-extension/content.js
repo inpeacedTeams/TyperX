@@ -20,7 +20,6 @@
       });
       lastText = text;
     } catch {
-      // TyperX is not listening yet. Retry while the test is visible.
     }
   };
 

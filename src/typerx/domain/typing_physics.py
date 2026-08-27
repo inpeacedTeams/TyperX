@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# Approximate touch-typing assignments for English and Russian layouts.
 _FINGER_ROWS = {
     "lp": "qazйфя",
     "lr": "wsxцыч",

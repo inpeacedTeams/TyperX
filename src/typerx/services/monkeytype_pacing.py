@@ -11,11 +11,7 @@ from typerx.domain.typos import Typo
 SAFE_RAW_WPM = 340
 
 
-def scored_character_count(
-    text: str,
-    typos: dict[int, Typo],
-    correct_typos: bool,
-) -> int:
+def scored_character_count(text: str, typos: dict[int, Typo], correct_typos: bool) -> int:
     """Estimate Monkeytype's correctWord character count for the final input."""
     if correct_typos or not typos:
         return len(text)
@@ -53,13 +49,7 @@ def _word_penalties(text: str, typos: dict[int, Typo]) -> dict[int, int]:
     return penalties
 
 
-def fit_typos_to_raw_limit(
-    text: str,
-    target_wpm: int,
-    typos: dict[int, Typo],
-    correct_typos: bool,
-    raw_limit: int = SAFE_RAW_WPM,
-) -> dict[int, Typo]:
+def fit_typos_to_raw_limit(text: str, target_wpm: int, typos: dict[int, Typo], correct_typos: bool, raw_limit: int = SAFE_RAW_WPM) -> dict[int, Typo]:
     """Keep as many errors as possible without making Monkeytype reject raw WPM."""
     if correct_typos or not typos or target_wpm >= raw_limit:
         return {} if not correct_typos and target_wpm >= raw_limit else dict(typos)
@@ -73,20 +63,11 @@ def fit_typos_to_raw_limit(
     return kept
 
 
-def emitted_event_count(
-    text: str,
-    typos: dict[int, Typo],
-    correct_typos: bool,
-) -> int:
+def emitted_event_count(text: str, typos: dict[int, Typo], correct_typos: bool) -> int:
     return max(1, len(text) + (2 * len(typos) if correct_typos else 0))
 
 
-def event_interval_seconds(
-    text: str,
-    target_wpm: int,
-    typos: dict[int, Typo],
-    correct_typos: bool,
-) -> float:
+def event_interval_seconds(text: str, target_wpm: int, typos: dict[int, Typo], correct_typos: bool) -> float:
     scored = scored_character_count(text, typos, correct_typos)
     duration = scored / (max(25, target_wpm) * 5.0) * 60.0
     return max(0.010, duration / emitted_event_count(text, typos, correct_typos))
@@ -106,12 +87,7 @@ class AdaptiveDeadlinePacer:
     _last_word_length: int = 0
     _deadline: float | None = None
 
-    def next_deadline(
-        self,
-        char: str,
-        previous: str | None,
-        position: int,
-    ) -> float:
+    def next_deadline(self, char: str, previous: str | None, position: int) -> float:
         self.events += 1
         variation = self.profile.variation / 100.0
         self._tempo = 0.82 * self._tempo + self.rng.gauss(0.0, 0.22 + variation * 0.30)
@@ -139,8 +115,6 @@ class AdaptiveDeadlinePacer:
 
         interval = max(0.010, min(0.95, interval * fatigue))
         previous_deadline = self.started_at if self._deadline is None else self._deadline
-        # Never calculate from started_at * events. That resets the interval on
-        # every character and causes bursts, skipped-looking chunks, and lag.
         self._deadline = max(previous_deadline, time.perf_counter()) + interval
         return self._deadline
 
