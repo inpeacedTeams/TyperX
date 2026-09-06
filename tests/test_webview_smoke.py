@@ -76,7 +76,7 @@ class WebViewSmokeTests(unittest.TestCase):
             self.assertTrue(self.evaluate(f"!document.getElementById('view-{section}').hidden"))
         self.evaluate("document.getElementById('prepare').click()")
         self.wait_js("document.getElementById('notice').classList.contains('error')")
-        self.assertIn("личного чата", self.evaluate("document.getElementById('notice').textContent"))
+        self.assertIn("таргета", self.evaluate("document.getElementById('notice').textContent"))
         self.assertTrue(self.window.bridge.runtime.stopped.is_set())
 
     def test_malformed_bridge_messages_are_rejected(self):
