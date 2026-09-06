@@ -1,26 +1,23 @@
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 qt_datas = collect_data_files("PySide6")
 interception_datas, interception_binaries, interception_hidden = collect_all("interception")
 
-hiddenimports = interception_hidden + [
-    "win32api",
-    "win32con",
-    "win32gui",
-    "pywintypes",
-    "pythoncom",
+hiddenimports = interception_hidden + collect_submodules("telethon") + [
+    "win32api", "win32con", "win32gui", "win32crypt", "win32process",
+    "pywintypes", "pythoncom",
 ]
 
 a = Analysis(
     ["src/typerx/__main__.py"],
     pathex=["src"],
     binaries=interception_binaries,
-    datas=qt_datas + interception_datas,
+    datas=qt_datas + interception_datas + [("src/typerx/ui/web", "typerx/ui/web")],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets"],
+    excludes=[],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

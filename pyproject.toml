@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "typerx"
-version = "1.1.2"
-description = "Local-first natural typing studio for Windows"
+version = "1.2.0"
+description = "Local-first natural typing and AI studio for Windows"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
@@ -15,6 +15,7 @@ dependencies = [
     "interception-python>=1.13.6,<2",
     "pywin32>=308",
     "pywinauto>=0.6.9,<0.7",
+    "telethon>=1.36,<2",
 ]
 
 [project.optional-dependencies]
