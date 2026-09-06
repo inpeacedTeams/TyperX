@@ -8,8 +8,8 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestInterceptor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from typerx.llm_provider import ProviderRuntime as Runtime
-from typerx.platform.windows import GlobalHotkeys
+from typerx.llm_stream import StreamRuntime as Runtime
+from typerx.studio_hotkeys import GlobalHotkeys
 
 
 class LocalOnly(QWebEngineUrlRequestInterceptor):
@@ -43,8 +43,22 @@ class Bridge(QObject):
 
     def __init__(self, root, parent):
         super().__init__(parent)
-        self.runtime = Runtime(root, lambda event: self.response.emit(json.dumps(event, ensure_ascii=False)))
-        self.hotkey_start.connect(lambda: self.runtime.submit("hotkey", "start", {}))
+        self.runtime = Runtime(root, self.emit_event)
+        self.hotkey_start.connect(self.start_from_hotkey)
+
+    def emit_event(self, event):
+        self.response.emit(json.dumps(event, ensure_ascii=False))
+        if event.get("id") == "hotkey" and event.get("ok") is False:
+            self.runtime.notify("error", event["error"])
+
+    def start_from_hotkey(self):
+        self.runtime.notify(self.runtime.stage, "F8 получен. Проверяем условия запуска…")
+        self.runtime.submit("hotkey", "start", {})
+
+    def hotkey_failure(self, message):
+        self.runtime.store.warning = message
+        self.runtime.stop()
+        self.runtime.notify("error", message)
 
     @Slot(str)
     def request(self, payload):
@@ -87,8 +101,12 @@ class WebWindow(QWebEngineView):
         self.channel = QWebChannel(self.local_page)
         self.channel.registerObject("studio", self.bridge)
         self.local_page.setWebChannel(self.channel)
-        self.hotkeys = GlobalHotkeys(self.bridge.hotkey_start.emit, self.bridge.runtime.stop)
-        self.hotkeys.start()
+        self.hotkeys = GlobalHotkeys(self.bridge.start_from_hotkey, self.bridge.runtime.stop,
+                                     self.bridge.hotkey_failure)
+        try:
+            self.hotkeys.start()
+        except OSError:
+            self.bridge.hotkey_failure("Не удалось включить глобальные F8/F9. Перезапусти TyperX в Windows.")
         self.load(index)
 
     def closeEvent(self, event):

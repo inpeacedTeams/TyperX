@@ -1,4 +1,3 @@
-import asyncio
 import io
 import json
 import unittest
@@ -112,7 +111,7 @@ class HotkeyTests(unittest.TestCase):
     def test_polling_routes_callbacks_without_qt_or_registration(self):
         start, stop = MagicMock(), MagicMock()
         hotkeys = GlobalHotkeys(start, stop)
-        hotkeys._key = MagicMock(side_effect=[0, 0, 0x8000, 0, 0x8000, 0, 0, 0, 0x8000, 0x8000])
+        hotkeys._key = MagicMock(side_effect=[0, 0, 0x8000, 0, 0x8000, 0, 0, 0x8000, 0x8000])
         hotkeys._closed = MagicMock()
         hotkeys._closed.wait.side_effect = [False, False, False, False, True]
         hotkeys._run()

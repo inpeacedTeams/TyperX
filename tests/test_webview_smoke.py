@@ -79,6 +79,12 @@ class WebViewSmokeTests(unittest.TestCase):
         self.assertIn("таргета", self.evaluate("document.getElementById('notice').textContent"))
         self.assertTrue(self.window.bridge.runtime.stopped.is_set())
 
+    def test_hotkey_failure_is_visible_in_event_log(self):
+        self.window.bridge.start_from_hotkey()
+        self.wait_js("document.getElementById('stage').textContent === 'Остановлен с ошибкой'")
+        self.assertIn("Подготовить запуск", self.evaluate("document.getElementById('detail').textContent"))
+        self.assertTrue(self.window.bridge.runtime.stopped.is_set())
+
     def test_malformed_bridge_messages_are_rejected(self):
         responses = []
         self.window.bridge.response.connect(responses.append)
