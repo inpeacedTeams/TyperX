@@ -8,7 +8,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestInterceptor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from typerx.targeting import SenderRuntime as Runtime
+from typerx.llm_provider import ProviderRuntime as Runtime
 from typerx.platform.windows import GlobalHotkeys
 
 
