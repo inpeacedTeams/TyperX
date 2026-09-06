@@ -13,3 +13,9 @@ dist/
 .idea/
 .vscode/
 *.log
+.env
+.env.*
+*.session
+*.session-*
+ai-secrets.bin
+ai.json
