@@ -141,6 +141,7 @@ class Runtime:
         self.store = AIStore(root)
         self.telegram = TelegramGateway(self.store, self.notify)
         self.llm = OpenAIClient()
+        self.closed = threading.Event()
         self.stopped = threading.Event()
         self.stopped.set()
         self.ui_executor = ThreadPoolExecutor(max_workers=1, initializer=initialize_uia_thread)
@@ -172,7 +173,8 @@ class Runtime:
         with self.control_lock:
             self.epoch += 1
             self.stopped.set()
-        self.loop.call_soon_threadsafe(self._cancel)
+        if not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(self._cancel)
 
     def _cancel(self):
         self.prepared = False
@@ -183,11 +185,17 @@ class Runtime:
             self.notify("idle", "Остановлено · F9")
 
     def submit(self, request_id, operation, data):
-        asyncio.run_coroutine_threadsafe(self._request(request_id, operation, data), self.loop)
+        if self.closed.is_set():
+            return
+        with self.control_lock:
+            epoch = self.epoch
+        asyncio.run_coroutine_threadsafe(self._request(request_id, operation, data, epoch), self.loop)
 
-    async def _request(self, request_id, operation, data):
+    async def _request(self, request_id, operation, data, epoch=None):
         try:
             async with self.request_lock:
+                if operation == "start" and epoch is not None and epoch != self.epoch:
+                    raise AIError("Отложенный запуск отменён через F9")
                 value = await self.dispatch(operation, data)
             self.emit({"id": request_id, "ok": True, "data": value})
         except asyncio.CancelledError:
@@ -259,6 +267,7 @@ class Runtime:
             text = await self.llm.complete(self.store.config, self.store.secrets.get("api_key", ""), [], check=True)
             return {"message": "Подключение работает: " + text}
         if operation == "prepare":
+            self.prepared = False
             self.mode = data.get("mode", "ai")
             if self.mode not in {"ai", "manual"}:
                 raise AIError("Неизвестный режим")
@@ -336,11 +345,19 @@ class Runtime:
             self.notify(stage, detail)
 
     def close(self):
+        if self.closed.is_set():
+            return
+        self.closed.set()
         self.stop()
         async def shutdown():
             if self.job:
                 await asyncio.gather(self.job, return_exceptions=True)
             await self.telegram.close()
+            pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            await self.loop.shutdown_asyncgens()
         future = asyncio.run_coroutine_threadsafe(shutdown(), self.loop)
         try:
             future.result(timeout=8)
@@ -349,6 +366,8 @@ class Runtime:
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.thread.join(timeout=2)
         self.ui_executor.shutdown(wait=False, cancel_futures=True)
+        if not self.thread.is_alive():
+            self.loop.close()
 
 
 def friendly_error(exc):

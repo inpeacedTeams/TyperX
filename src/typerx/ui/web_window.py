@@ -48,15 +48,21 @@ class Bridge(QObject):
 
     @Slot(str)
     def request(self, payload):
-        if len(payload) > 220000:
-            return
+        request_id = "invalid"
         try:
+            if len(payload) > 2_000_000:
+                raise ValueError("Request too large")
             value = json.loads(payload)
-            if not isinstance(value.get("data", {}), dict):
-                return
-            self.runtime.submit(str(value["id"])[:80], str(value["operation"])[:40], value.get("data", {}))
+            if not isinstance(value, dict):
+                raise ValueError("Expected an object")
+            request_id = str(value.get("id", "invalid"))[:80]
+            if (not isinstance(value.get("operation"), str)
+                    or not isinstance(value.get("data", {}), dict)):
+                raise ValueError("Invalid request fields")
+            self.runtime.submit(request_id, value["operation"][:40], value.get("data", {}))
         except (ValueError, KeyError, TypeError):
-            return
+            self.response.emit(json.dumps({"id": request_id, "ok": False,
+                                           "error": "Некорректный запрос интерфейса"}, ensure_ascii=False))
 
     @Slot()
     def stop(self):
@@ -88,4 +94,5 @@ class WebWindow(QWebEngineView):
     def closeEvent(self, event):
         self.hotkeys.close()
         self.bridge.runtime.close()
+        self.local_page.deleteLater()
         super().closeEvent(event)
